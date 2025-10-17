@@ -1,0 +1,108 @@
+package com.intellij.plugin.forcereload.toolwindow;
+
+import com.intellij.openapi.project.Project;
+import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBScrollPane;
+import com.intellij.ui.table.JBTable;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+public class FileWatcherToolWindowContent {
+    private final JPanel contentPanel = new JPanel(new BorderLayout());
+    private final DefaultTableModel eventsTableModel;
+    private final JBTable eventsTable;
+    private static final int MAX_ROWS = 1000;
+    private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+    private final Project project;
+
+    public FileWatcherToolWindowContent(Project project) {
+        this.project = project;
+
+        // Create single table model for all events
+        eventsTableModel = new DefaultTableModel(new String[]{"Timestamp", "Ignored", "Event Type", "Triggered By", "File Path"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+
+            @Override
+            public Class<?> getColumnClass(int column) {
+                if (column == 1) { // Ignored column
+                    return Boolean.class;
+                }
+                return String.class;
+            }
+        };
+
+        eventsTable = new JBTable(eventsTableModel);
+        eventsTable.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
+        eventsTable.getColumnModel().getColumn(0).setPreferredWidth(150);
+        eventsTable.getColumnModel().getColumn(0).setMaxWidth(200);
+        eventsTable.getColumnModel().getColumn(1).setPreferredWidth(60);
+        eventsTable.getColumnModel().getColumn(1).setMaxWidth(80);
+        eventsTable.getColumnModel().getColumn(2).setPreferredWidth(80);
+        eventsTable.getColumnModel().getColumn(2).setMaxWidth(100);
+        eventsTable.getColumnModel().getColumn(3).setPreferredWidth(200);
+        eventsTable.getColumnModel().getColumn(3).setMaxWidth(350);
+
+        // Create clear button
+        JButton clearButton = new JButton("Clear Events");
+        clearButton.addActionListener(e -> clear());
+
+        JPanel headerPanel = new JPanel(new BorderLayout());
+        headerPanel.add(new JBLabel("File Watcher Events - Project: " + project.getName()), BorderLayout.WEST);
+        headerPanel.add(clearButton, BorderLayout.EAST);
+
+        contentPanel.add(headerPanel, BorderLayout.NORTH);
+        contentPanel.add(new JBScrollPane(eventsTable), BorderLayout.CENTER);
+    }
+
+    public JPanel getContentPanel() {
+        return contentPanel;
+    }
+
+    public void addEvent(String event, String filePath) {
+        SwingUtilities.invokeLater(() -> {
+            String timestamp = dateFormat.format(new Date());
+            eventsTableModel.insertRow(0, new Object[]{timestamp, false, event, filePath});
+
+            // Limit rows to prevent memory issues
+            while (eventsTableModel.getRowCount() > MAX_ROWS) {
+                eventsTableModel.removeRow(eventsTableModel.getRowCount() - 1);
+            }
+
+            // Scroll to the first row (most recent event)
+            if (eventsTable.getRowCount() > 0) {
+                eventsTable.scrollRectToVisible(eventsTable.getCellRect(0, 0, true));
+            }
+        });
+    }
+
+    public void addIgnoredEvent(String reason, String filePath) {
+        SwingUtilities.invokeLater(() -> {
+            String timestamp = dateFormat.format(new Date());
+            eventsTableModel.insertRow(0, new Object[]{timestamp, true, reason, filePath});
+
+            // Limit rows to prevent memory issues
+            while (eventsTableModel.getRowCount() > MAX_ROWS) {
+                eventsTableModel.removeRow(eventsTableModel.getRowCount() - 1);
+            }
+
+            // Scroll to the first row (most recent event)
+            if (eventsTable.getRowCount() > 0) {
+                eventsTable.scrollRectToVisible(eventsTable.getCellRect(0, 0, true));
+            }
+        });
+    }
+
+    public void clear() {
+        SwingUtilities.invokeLater(() -> {
+            eventsTableModel.setRowCount(0);
+        });
+    }
+}
+
