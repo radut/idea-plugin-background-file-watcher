@@ -19,11 +19,6 @@ import com.intellij.plugin.forcereload.toolwindow.FileWatcherToolWindowFactory;
 import com.intellij.ui.content.Content;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
-
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
@@ -41,6 +36,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class FileWatcherService implements Disposable {
     private static final Logger LOG = Logger.getInstance(FileWatcherService.class);
@@ -168,13 +165,12 @@ public class FileWatcherService implements Disposable {
                 if (checkResult.shouldProcess) {
                     // Format event type: CREATE/MODIFY/DELETE
                     String changeType = kind.name().replace("ENTRY_", "");
-                    String eventType = changeType + " [" + checkResult.matchedRule + "]";
-                    LOG.info("Detected " + eventType + " in: " + fullPath);
-                    logToToolWindow(eventType, fullPath.toString());
+                    LOG.info("Detected " + changeType + " in: " + fullPath + " [" + checkResult.matchedRule + "]");
+                    logToToolWindow(changeType, checkResult.matchedRule, fullPath.toString());
                     hasRelevantChanges = true;
                 } else {
                     // Log ignored event
-                    logIgnoredToToolWindow(checkResult.ignoreReason, fullPath.toString());
+                    logIgnoredToToolWindow(checkResult.ignoreReason, "N/A", fullPath.toString());
                 }
 
                 // If a new directory was created, register it for watching
@@ -216,10 +212,6 @@ public class FileWatcherService implements Disposable {
             // Use IntelliJ's ProjectFileIndex to determine if file is part of the project
             VirtualFile vFile = VirtualFileManager.getInstance().findFileByNioPath(path);
 
-            if (vFile == null || !vFile.exists()) {
-                return new FileCheckResult(false, null, "File not found in VFS");
-            }
-
             FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
             ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
             String pathStr = path.toString();
@@ -237,7 +229,7 @@ public class FileWatcherService implements Disposable {
                     try {
                         Pattern pattern = Pattern.compile(patternStr);
                         if (pattern.matcher(pathStr).find()) {
-                            return new FileCheckResult(false, null, "Matched ignored regex: " + patternStr);
+                            return new FileCheckResult(false, "Ignore Regex", "Matched ignored regex: " + patternStr);
                         }
                     } catch (PatternSyntaxException e) {
                         LOG.warn("Invalid ignored regex pattern: " + patternStr, e);
@@ -245,51 +237,33 @@ public class FileWatcherService implements Disposable {
                 }
             }
 
-            // Now check include filters - file passes if ANY filter matches (OR logic)
-            List<String> matchedRules = new ArrayList<>();
-
-            // Check if ANY checkbox filter is enabled
-            boolean anyCheckboxEnabled = settings.isCheckIsInContent() || settings.isCheckIsExcluded() ||
-                                         settings.isCheckIsInSource() || settings.isCheckIsInTestSource() ||
-                                         settings.isCheckIsInLibrary();
 
             // Check if included regex is configured
             String regexFilters = settings.getPathRegexFilters();
             boolean hasIncludedRegex = regexFilters != null && !regexFilters.trim().isEmpty();
 
-            // If no filters are enabled at all, accept the file by default
-            if (!anyCheckboxEnabled && !hasIncludedRegex) {
-                return new FileCheckResult(true, "Default (no filters)", null);
-            }
-
-            // Apply checkbox filters - if enabled, check if they match
-            if (settings.isCheckIsInContent()) {
-                if (fileIndex.isInContent(vFile)) {
-                    matchedRules.add("InContent");
+            // Apply checkbox filters - if enabled, check if they match and return immediately
+            if (settings.isInContent()) {
+                if (vFile != null && fileIndex.isInContent(vFile)) {
+                    return new FileCheckResult(true, "InContent", null);
                 }
             }
 
-            if (settings.isCheckIsExcluded()) {
-                if (!fileIndex.isExcluded(vFile)) {
-                    matchedRules.add("NotExcluded");
+            if (settings.isInSource()) {
+                if (vFile != null && fileIndex.isInSource(vFile)) {
+                    return new FileCheckResult(true, "InSource", null);
                 }
             }
 
-            if (settings.isCheckIsInSource()) {
-                if (fileIndex.isInSource(vFile)) {
-                    matchedRules.add("InSource");
+            if (settings.isInTestSource()) {
+                if (vFile != null && fileIndex.isInTestSourceContent(vFile)) {
+                    return new FileCheckResult(true, "InTestSource", null);
                 }
             }
 
-            if (settings.isCheckIsInTestSource()) {
-                if (fileIndex.isInTestSourceContent(vFile)) {
-                    matchedRules.add("InTestSource");
-                }
-            }
-
-            if (settings.isCheckIsInLibrary()) {
-                if (fileIndex.isInLibrary(vFile)) {
-                    matchedRules.add("InLibrary");
+            if (settings.isInGeneratedSource()) {
+                if (vFile != null && fileIndex.isInGeneratedSources(vFile)) {
+                    return new FileCheckResult(true, "InGeneratedSource", null);
                 }
             }
 
@@ -305,8 +279,7 @@ public class FileWatcherService implements Disposable {
                     try {
                         Pattern pattern = Pattern.compile(patternStr);
                         if (pattern.matcher(pathStr).find()) {
-                            matchedRules.add("Regex: " + patternStr);
-                            break; // Only add the first matching regex
+                            return new FileCheckResult(true, "Regex: " + patternStr, null);
                         }
                     } catch (PatternSyntaxException e) {
                         LOG.warn("Invalid included regex pattern: " + patternStr, e);
@@ -314,14 +287,8 @@ public class FileWatcherService implements Disposable {
                 }
             }
 
-            // If any filter matched, accept the file
-            if (!matchedRules.isEmpty()) {
-                String rulesStr = String.join(", ", matchedRules);
-                return new FileCheckResult(true, rulesStr, null);
-            }
-
             // No filters matched - reject the file
-            return new FileCheckResult(false, null, "No filters matched");
+            return new FileCheckResult(false, "None", "No filters matched");
         });
     }
 
@@ -329,7 +296,7 @@ public class FileWatcherService implements Disposable {
         return checkFile(path).shouldProcess;
     }
 
-    private void logToToolWindow(String event, String filePath) {
+    private void logToToolWindow(String event, String triggeredBy, String filePath) {
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
                 ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(project);
@@ -341,7 +308,7 @@ public class FileWatcherService implements Disposable {
                         FileWatcherToolWindowContent toolWindowContent = content.getUserData(FileWatcherToolWindowFactory.TOOL_WINDOW_CONTENT_KEY);
 
                         if (toolWindowContent != null) {
-                            toolWindowContent.addEvent(event, filePath);
+                            toolWindowContent.addEvent(event, triggeredBy, filePath);
                         } else {
                             LOG.warn("Tool window content not found in user data - tool window may not be initialized yet");
                         }
@@ -357,7 +324,7 @@ public class FileWatcherService implements Disposable {
         });
     }
 
-    private void logIgnoredToToolWindow(String reason, String filePath) {
+    private void logIgnoredToToolWindow(String reason, String triggeredBy, String filePath) {
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
                 ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(project);
@@ -369,7 +336,7 @@ public class FileWatcherService implements Disposable {
                         FileWatcherToolWindowContent toolWindowContent = content.getUserData(FileWatcherToolWindowFactory.TOOL_WINDOW_CONTENT_KEY);
 
                         if (toolWindowContent != null) {
-                            toolWindowContent.addIgnoredEvent(reason, filePath);
+                            toolWindowContent.addIgnoredEvent(reason, triggeredBy, filePath);
                         } else {
                             LOG.warn("Tool window content not found in user data - tool window may not be initialized yet");
                         }

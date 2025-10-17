@@ -49,13 +49,20 @@ public class FileWatcherToolWindowContent {
         eventsTable.getColumnModel().getColumn(3).setPreferredWidth(200);
         eventsTable.getColumnModel().getColumn(3).setMaxWidth(350);
 
-        // Create clear button
+        // Create buttons
         JButton clearButton = new JButton("Clear Events");
         clearButton.addActionListener(e -> clear());
 
+        JButton scrollToBottomButton = new JButton("Scroll to Bottom");
+        scrollToBottomButton.addActionListener(e -> scrollToBottom());
+
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.add(new JBLabel("File Watcher Events - Project: " + project.getName()), BorderLayout.WEST);
-        headerPanel.add(clearButton, BorderLayout.EAST);
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
+        buttonPanel.add(scrollToBottomButton);
+        buttonPanel.add(clearButton);
+        headerPanel.add(buttonPanel, BorderLayout.EAST);
 
         contentPanel.add(headerPanel, BorderLayout.NORTH);
         contentPanel.add(new JBScrollPane(eventsTable), BorderLayout.CENTER);
@@ -65,37 +72,35 @@ public class FileWatcherToolWindowContent {
         return contentPanel;
     }
 
-    public void addEvent(String event, String filePath) {
+    public void addEvent(String event, String triggeredBy, String filePath) {
         SwingUtilities.invokeLater(() -> {
             String timestamp = dateFormat.format(new Date());
-            eventsTableModel.insertRow(0, new Object[]{timestamp, false, event, filePath});
+            // Add row at the end (bottom) for newest events
+            eventsTableModel.addRow(new Object[]{timestamp, false, event, triggeredBy, filePath});
 
-            // Limit rows to prevent memory issues
+            // Limit rows to prevent memory issues - remove from the top (oldest)
             while (eventsTableModel.getRowCount() > MAX_ROWS) {
-                eventsTableModel.removeRow(eventsTableModel.getRowCount() - 1);
+                eventsTableModel.removeRow(0);
             }
 
-            // Scroll to the first row (most recent event)
-            if (eventsTable.getRowCount() > 0) {
-                eventsTable.scrollRectToVisible(eventsTable.getCellRect(0, 0, true));
-            }
+            // Scroll to the last row (most recent event at bottom)
+            scrollToBottom();
         });
     }
 
-    public void addIgnoredEvent(String reason, String filePath) {
+    public void addIgnoredEvent(String reason, String triggeredBy, String filePath) {
         SwingUtilities.invokeLater(() -> {
             String timestamp = dateFormat.format(new Date());
-            eventsTableModel.insertRow(0, new Object[]{timestamp, true, reason, filePath});
+            // Add row at the end (bottom) for newest events
+            eventsTableModel.addRow(new Object[]{timestamp, true, reason, triggeredBy, filePath});
 
-            // Limit rows to prevent memory issues
+            // Limit rows to prevent memory issues - remove from the top (oldest)
             while (eventsTableModel.getRowCount() > MAX_ROWS) {
-                eventsTableModel.removeRow(eventsTableModel.getRowCount() - 1);
+                eventsTableModel.removeRow(0);
             }
 
-            // Scroll to the first row (most recent event)
-            if (eventsTable.getRowCount() > 0) {
-                eventsTable.scrollRectToVisible(eventsTable.getCellRect(0, 0, true));
-            }
+            // Scroll to the last row (most recent event at bottom)
+            scrollToBottom();
         });
     }
 
@@ -103,6 +108,13 @@ public class FileWatcherToolWindowContent {
         SwingUtilities.invokeLater(() -> {
             eventsTableModel.setRowCount(0);
         });
+    }
+
+    private void scrollToBottom() {
+        if (eventsTable.getRowCount() > 0) {
+            int lastRow = eventsTable.getRowCount() - 1;
+            eventsTable.scrollRectToVisible(eventsTable.getCellRect(lastRow, 0, true));
+        }
     }
 }
 

@@ -38,11 +38,10 @@ public class FileWatcherConfigurable implements Configurable {
         FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
         FileWatcherSettings.State state = settings.getState();
 
-        return settingsComponent.isCheckIsInContent() != state.checkIsInContent ||
-               settingsComponent.isCheckIsExcluded() != state.checkIsExcluded ||
-               settingsComponent.isCheckIsInSource() != state.checkIsInSource ||
-               settingsComponent.isCheckIsInTestSource() != state.checkIsInTestSource ||
-               settingsComponent.isCheckIsInLibrary() != state.checkIsInLibrary ||
+        return settingsComponent.isInContent() != state.isInContent ||
+               settingsComponent.isInSource() != state.isInSource ||
+               settingsComponent.isInTestSource() != state.isInTestSource ||
+               settingsComponent.isInGeneratedSource() != state.isInGeneratedSource ||
                settingsComponent.isAutoReloadEnabled() != state.autoReloadEnabled ||
                settingsComponent.isAutoRebuildEnabled() != state.autoRebuildEnabled ||
                settingsComponent.getDebounceDelayMs() != state.debounceDelayMs ||
@@ -89,11 +88,10 @@ public class FileWatcherConfigurable implements Configurable {
         }
 
         FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
-        settings.setCheckIsInContent(settingsComponent.isCheckIsInContent());
-        settings.setCheckIsExcluded(settingsComponent.isCheckIsExcluded());
-        settings.setCheckIsInSource(settingsComponent.isCheckIsInSource());
-        settings.setCheckIsInTestSource(settingsComponent.isCheckIsInTestSource());
-        settings.setCheckIsInLibrary(settingsComponent.isCheckIsInLibrary());
+        settings.setIsInContent(settingsComponent.isInContent());
+        settings.setIsInSource(settingsComponent.isInSource());
+        settings.setIsInTestSource(settingsComponent.isInTestSource());
+        settings.setIsInGeneratedSource(settingsComponent.isInGeneratedSource());
         settings.setAutoReloadEnabled(settingsComponent.isAutoReloadEnabled());
         settings.setAutoRebuildEnabled(settingsComponent.isAutoRebuildEnabled());
         settings.setDebounceDelayMs(settingsComponent.getDebounceDelayMs());
@@ -106,11 +104,10 @@ public class FileWatcherConfigurable implements Configurable {
         FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
         FileWatcherSettings.State state = settings.getState();
 
-        settingsComponent.setCheckIsInContent(state.checkIsInContent);
-        settingsComponent.setCheckIsExcluded(state.checkIsExcluded);
-        settingsComponent.setCheckIsInSource(state.checkIsInSource);
-        settingsComponent.setCheckIsInTestSource(state.checkIsInTestSource);
-        settingsComponent.setCheckIsInLibrary(state.checkIsInLibrary);
+        settingsComponent.setIsInContent(state.isInContent);
+        settingsComponent.setIsInSource(state.isInSource);
+        settingsComponent.setIsInTestSource(state.isInTestSource);
+        settingsComponent.setIsInGeneratedSource(state.isInGeneratedSource);
         settingsComponent.setAutoReloadEnabled(state.autoReloadEnabled);
         settingsComponent.setAutoRebuildEnabled(state.autoRebuildEnabled);
         settingsComponent.setDebounceDelayMs(state.debounceDelayMs);

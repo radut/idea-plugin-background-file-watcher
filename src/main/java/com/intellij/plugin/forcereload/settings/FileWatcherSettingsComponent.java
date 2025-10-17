@@ -15,11 +15,10 @@ import java.awt.*;
 public class FileWatcherSettingsComponent {
 
     private final JPanel mainPanel;
-    private final JBCheckBox checkIsInContent = new JBCheckBox("Include files in project content");
-    private final JBCheckBox checkIsExcluded = new JBCheckBox("Include non-excluded files (ignore build/out/target folders)");
-    private final JBCheckBox checkIsInSource = new JBCheckBox("Include source files");
-    private final JBCheckBox checkIsInTestSource = new JBCheckBox("Include test source files");
-    private final JBCheckBox checkIsInLibrary = new JBCheckBox("Include library files");
+    private final JBCheckBox isInContent = new JBCheckBox("Include files in project content");
+    private final JBCheckBox isInSource = new JBCheckBox("Include source files");
+    private final JBCheckBox isInTestSource = new JBCheckBox("Include test source files");
+    private final JBCheckBox isInGeneratedSource = new JBCheckBox("Include generated source files");
     private final JBCheckBox autoReloadEnabled = new JBCheckBox("Enable automatic reload from disk");
     private final JBCheckBox autoRebuildEnabled = new JBCheckBox("Enable automatic rebuild after reload");
     private final JBTextField debounceDelayField = new JBTextField();
@@ -55,16 +54,14 @@ public class FileWatcherSettingsComponent {
                 .addVerticalGap(10)
                 .addComponent(new JBLabel("<html>Configure which files should trigger auto-reload and rebuild:</html>"), 0)
                 .addVerticalGap(5)
-                .addComponent(checkIsInContent, 1)
+                .addComponent(isInContent, 1)
                 .addTooltip("Include files that are part of the project content")
-                .addComponent(checkIsExcluded, 1)
-                .addTooltip("Include files NOT in excluded directories like build/, out/, target/, etc.")
-                .addComponent(checkIsInSource, 1)
+                .addComponent(isInSource, 1)
                 .addTooltip("Include files in source directories (src/main/java, etc.)")
-                .addComponent(checkIsInTestSource, 1)
+                .addComponent(isInTestSource, 1)
                 .addTooltip("Include files in test source directories (src/test/java, etc.)")
-                .addComponent(checkIsInLibrary, 1)
-                .addTooltip("Include files from external libraries")
+                .addComponent(isInGeneratedSource, 1)
+                .addTooltip("Include files in generated source directories")
                 .addVerticalGap(15)
                 .addComponent(new JBLabel("<html><b>Included Path Regex Filters</b></html>"), 0)
                 .addVerticalGap(5)
@@ -95,44 +92,36 @@ public class FileWatcherSettingsComponent {
         return mainPanel;
     }
 
-    public boolean isCheckIsInContent() {
-        return checkIsInContent.isSelected();
+    public boolean isInContent() {
+        return isInContent.isSelected();
     }
 
-    public void setCheckIsInContent(boolean value) {
-        checkIsInContent.setSelected(value);
+    public void setIsInContent(boolean value) {
+        isInContent.setSelected(value);
     }
 
-    public boolean isCheckIsExcluded() {
-        return checkIsExcluded.isSelected();
+    public boolean isInSource() {
+        return isInSource.isSelected();
     }
 
-    public void setCheckIsExcluded(boolean value) {
-        checkIsExcluded.setSelected(value);
+    public void setIsInSource(boolean value) {
+        isInSource.setSelected(value);
     }
 
-    public boolean isCheckIsInSource() {
-        return checkIsInSource.isSelected();
+    public boolean isInTestSource() {
+        return isInTestSource.isSelected();
     }
 
-    public void setCheckIsInSource(boolean value) {
-        checkIsInSource.setSelected(value);
+    public void setIsInTestSource(boolean value) {
+        isInTestSource.setSelected(value);
     }
 
-    public boolean isCheckIsInTestSource() {
-        return checkIsInTestSource.isSelected();
+    public boolean isInGeneratedSource() {
+        return isInGeneratedSource.isSelected();
     }
 
-    public void setCheckIsInTestSource(boolean value) {
-        checkIsInTestSource.setSelected(value);
-    }
-
-    public boolean isCheckIsInLibrary() {
-        return checkIsInLibrary.isSelected();
-    }
-
-    public void setCheckIsInLibrary(boolean value) {
-        checkIsInLibrary.setSelected(value);
+    public void setIsInGeneratedSource(boolean value) {
+        isInGeneratedSource.setSelected(value);
     }
 
     public boolean isAutoReloadEnabled() {

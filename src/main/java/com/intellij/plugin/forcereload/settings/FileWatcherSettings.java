@@ -32,11 +32,10 @@ public class FileWatcherSettings implements PersistentStateComponent<FileWatcher
     }
 
     public static class State {
-        public boolean checkIsInContent = true;
-        public boolean checkIsExcluded = true;
-        public boolean checkIsInSource = false;
-        public boolean checkIsInTestSource = false;
-        public boolean checkIsInLibrary = false;
+        public boolean isInContent = true;
+        public boolean isInSource = false;
+        public boolean isInTestSource = false;
+        public boolean isInGeneratedSource = false;
         public boolean autoReloadEnabled = true;
         public boolean autoRebuildEnabled = true;
         public int debounceDelayMs = 500;
@@ -45,44 +44,36 @@ public class FileWatcherSettings implements PersistentStateComponent<FileWatcher
     }
 
     // Convenience methods
-    public boolean isCheckIsInContent() {
-        return state.checkIsInContent;
+    public boolean isInContent() {
+        return state.isInContent;
     }
 
-    public void setCheckIsInContent(boolean value) {
-        state.checkIsInContent = value;
+    public void setIsInContent(boolean value) {
+        state.isInContent = value;
     }
 
-    public boolean isCheckIsExcluded() {
-        return state.checkIsExcluded;
+    public boolean isInSource() {
+        return state.isInSource;
     }
 
-    public void setCheckIsExcluded(boolean value) {
-        state.checkIsExcluded = value;
+    public void setIsInSource(boolean value) {
+        state.isInSource = value;
     }
 
-    public boolean isCheckIsInSource() {
-        return state.checkIsInSource;
+    public boolean isInTestSource() {
+        return state.isInTestSource;
     }
 
-    public void setCheckIsInSource(boolean value) {
-        state.checkIsInSource = value;
+    public void setIsInTestSource(boolean value) {
+        state.isInTestSource = value;
     }
 
-    public boolean isCheckIsInTestSource() {
-        return state.checkIsInTestSource;
+    public boolean isInGeneratedSource() {
+        return state.isInGeneratedSource;
     }
 
-    public void setCheckIsInTestSource(boolean value) {
-        state.checkIsInTestSource = value;
-    }
-
-    public boolean isCheckIsInLibrary() {
-        return state.checkIsInLibrary;
-    }
-
-    public void setCheckIsInLibrary(boolean value) {
-        state.checkIsInLibrary = value;
+    public void setIsInGeneratedSource(boolean value) {
+        state.isInGeneratedSource = value;
     }
 
     public boolean isAutoReloadEnabled() {
