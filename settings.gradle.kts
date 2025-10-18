@@ -1,1 +1,1 @@
-rootProject.name = "intellij-plugin-force-reload-from-disk"
+rootProject.name = "idea-plugin-background-file-watcher"

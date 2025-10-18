@@ -1,4 +1,4 @@
-package com.intellij.plugin.bfw;
+package com.radut.plugin.bfw;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
@@ -17,9 +17,9 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
-import com.intellij.plugin.bfw.settings.FileWatcherSettings;
-import com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowContent;
-import com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowFactory;
+import com.radut.plugin.bfw.settings.FileWatcherSettings;
+import com.radut.plugin.bfw.toolwindow.FileWatcherToolWindowContent;
+import com.radut.plugin.bfw.toolwindow.FileWatcherToolWindowFactory;
 import com.intellij.ui.content.Content;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
@@ -49,9 +49,11 @@ import java.util.regex.PatternSyntaxException;
 
 public class FileWatcherService implements Disposable {
     private static final Logger LOG = Logger.getInstance(FileWatcherService.class);
-    private static final String TOOL_WINDOW_ID = "File Watcher";
     private static final String SYNC_ACTION_ID = "Synchronize";
     private static final String BUILD_ACTION_ID = "CompileDirty";
+
+    private static final String TOOL_WINDOW_ID = "File Watcher";
+
     private static final int REBUILD_DELAY_MS = 500;
     private static final int SHUTDOWN_TIMEOUT_SECONDS = 5;
     private static final int WATCH_POLL_TIMEOUT_MS = 200;
@@ -500,7 +502,7 @@ public class FileWatcherService implements Disposable {
                     };
 
                     AnActionEvent syncEvent = AnActionEvent.createFromDataContext(
-                            "ForceReloadFromDisk",
+                            "Background Action",
                             null,
                             dataContext
                     );
@@ -521,7 +523,7 @@ public class FileWatcherService implements Disposable {
                             };
 
                             AnActionEvent rebuildEvent = AnActionEvent.createFromDataContext(
-                                    "ForceReloadRebuild",
+                                    "Background Action",
                                     null,
                                     rebuildContext
                             );

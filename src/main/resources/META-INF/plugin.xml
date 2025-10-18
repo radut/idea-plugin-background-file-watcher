@@ -1,7 +1,7 @@
 <idea-plugin>
-    <id>com.intellij.plugin.bfw</id>
+    <id>com.radut.plugin.bfw</id>
     <name>Background File Watcher</name>
-    <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
+    <vendor email="vendor@example.com" url="http://github.com/radut/idea-plugin-background-file-watcher">RaduT</vendor>
 
     <description><![CDATA[
     Automatically watches project source and resource files for external changes and triggers
@@ -18,22 +18,22 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Project-level service for file watching -->
-        <projectService serviceImplementation="com.intellij.plugin.bfw.FileWatcherService"/>
+        <projectService serviceImplementation="com.radut.plugin.bfw.FileWatcherService"/>
         <!-- Startup activity to initialize file watcher -->
-        <postStartupActivity implementation="com.intellij.plugin.bfw.ProjectOpenListener"/>
+        <postStartupActivity implementation="com.radut.plugin.bfw.ProjectOpenListener"/>
         <!-- Project-level settings service (stored in .idea folder) -->
-        <projectService serviceImplementation="com.intellij.plugin.bfw.settings.FileWatcherSettings"/>
+        <projectService serviceImplementation="com.radut.plugin.bfw.settings.FileWatcherSettings"/>
         <!-- Settings UI -->
         <projectConfigurable
                 parentId="tools"
-                instance="com.intellij.plugin.bfw.settings.FileWatcherConfigurable"
-                id="com.intellij.plugin.bfw.settings.FileWatcherConfigurable"
+                instance="com.radut.plugin.bfw.settings.FileWatcherConfigurable"
+                id="com.radut.plugin.bfw.settings.FileWatcherConfigurable"
                 displayName="Background File Watcher"/>
         <!-- Tool Window -->
         <toolWindow
                 id="File Watcher"
                 anchor="bottom"
-                factoryClass="com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowFactory"
+                factoryClass="com.radut.plugin.bfw.toolwindow.FileWatcherToolWindowFactory"
                 icon="AllIcons.Actions.Refresh"/>
     </extensions>
 </idea-plugin>

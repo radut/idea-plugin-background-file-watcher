@@ -1,6 +1,9 @@
 # Background File Watcher
+[![Get it from JetBrains Marketplace](https://img.shields.io/badge/JetBrains_Marketplace-Get_it-blue?logo=jetbrains)](https://plugins.jetbrains.com/plugin/28751)
 
 An IntelliJ IDEA plugin that watches files in the background and triggers "Synchronize All From Disk" and build when changes are detected.
+
+[![Donate](https://img.shields.io/badge/Donate-PayPal-blue.svg)](https://www.paypal.com/donate/?hosted_button_id=C9U54KULFG48C)
 
 ## Features
 
@@ -56,6 +59,18 @@ To test the plugin in a sandboxed IntelliJ IDEA instance:
 6. The reload triggers IntelliJ's synchronization action to refresh files from disk
 7. Optionally triggers a project rebuild after synchronization
 
+## Screenshots
+
+### Configuration Settings
+Configure filtering, regex patterns, and auto-reload behavior in the plugin settings:
+
+![File Watcher Preferences](FileWatcher-Preference.png)
+
+### Event Monitoring
+Track file changes and see which rules matched in real-time:
+
+![File Watcher Event Window](FileWatcher-EventWindow.png)
+
 ## Configuration
 
 Navigate to **Settings/Preferences → Tools → File Watcher Auto Reload** to configure:
@@ -65,8 +80,8 @@ Navigate to **Settings/Preferences → Tools → File Watcher Auto Reload** to c
    - Check is in test source
    - Check is in generated source
    - Check is in project content
-2. 
-3. **Regex Path Filters**:
+   
+2. **Regex Path Filters**:
    - Define custom regex patterns (one per line)
    - Define ignore file patter regex
    - Patterns are validated on save

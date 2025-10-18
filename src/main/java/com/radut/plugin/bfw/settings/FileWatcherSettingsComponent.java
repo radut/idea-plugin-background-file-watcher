@@ -1,4 +1,4 @@
-package com.intellij.plugin.bfw.settings;
+package com.radut.plugin.bfw.settings;
 
 import com.intellij.ide.BrowserUtil;
 import com.intellij.ui.components.JBCheckBox;
