@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload.toolwindow;
+package com.intellij.plugin.bfw.toolwindow;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.components.JBLabel;
@@ -15,12 +15,10 @@ public class FileWatcherToolWindowContent {
     private final JPanel contentPanel = new JPanel(new BorderLayout());
     private final DefaultTableModel eventsTableModel;
     private final JBTable eventsTable;
-    private static final int MAX_ROWS = 1000;
+    private static final int MAX_ROWS = 1_000;
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-    private final Project project;
 
     public FileWatcherToolWindowContent(Project project) {
-        this.project = project;
 
         // Create single table model for all events
         eventsTableModel = new DefaultTableModel(new String[]{"Timestamp", "Ignored", "Event Type", "Triggered By", "File Path"}, 0) {

@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload;
+package com.intellij.plugin.bfw;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;

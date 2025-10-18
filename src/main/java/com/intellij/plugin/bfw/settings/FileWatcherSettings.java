@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload.settings;
+package com.intellij.plugin.bfw.settings;
 
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
@@ -32,10 +32,10 @@ public class FileWatcherSettings implements PersistentStateComponent<FileWatcher
     }
 
     public static class State {
+        public boolean isInSource = true;
+        public boolean isInTestSource = true;
+        public boolean isInGeneratedSource = true;
         public boolean isInContent = true;
-        public boolean isInSource = false;
-        public boolean isInTestSource = false;
-        public boolean isInGeneratedSource = false;
         public boolean autoReloadEnabled = true;
         public boolean autoRebuildEnabled = true;
         public int debounceDelayMs = 500;
@@ -44,14 +44,6 @@ public class FileWatcherSettings implements PersistentStateComponent<FileWatcher
     }
 
     // Convenience methods
-    public boolean isInContent() {
-        return state.isInContent;
-    }
-
-    public void setIsInContent(boolean value) {
-        state.isInContent = value;
-    }
-
     public boolean isInSource() {
         return state.isInSource;
     }
@@ -74,6 +66,14 @@ public class FileWatcherSettings implements PersistentStateComponent<FileWatcher
 
     public void setIsInGeneratedSource(boolean value) {
         state.isInGeneratedSource = value;
+    }
+
+    public boolean isInContent() {
+        return state.isInContent;
+    }
+
+    public void setIsInContent(boolean value) {
+        state.isInContent = value;
     }
 
     public boolean isAutoReloadEnabled() {

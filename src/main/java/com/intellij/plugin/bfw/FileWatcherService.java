@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload;
+package com.intellij.plugin.bfw;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
@@ -13,9 +13,9 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
-import com.intellij.plugin.forcereload.settings.FileWatcherSettings;
-import com.intellij.plugin.forcereload.toolwindow.FileWatcherToolWindowContent;
-import com.intellij.plugin.forcereload.toolwindow.FileWatcherToolWindowFactory;
+import com.intellij.plugin.bfw.settings.FileWatcherSettings;
+import com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowContent;
+import com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowFactory;
 import com.intellij.ui.content.Content;
 import org.jetbrains.annotations.NotNull;
 
@@ -41,6 +41,12 @@ import java.util.regex.PatternSyntaxException;
 
 public class FileWatcherService implements Disposable {
     private static final Logger LOG = Logger.getInstance(FileWatcherService.class);
+    private static final String TOOL_WINDOW_ID = "File Watcher";
+    private static final String SYNC_ACTION_ID = "Synchronize";
+    private static final String BUILD_ACTION_ID = "CompileDirty";
+    private static final int REBUILD_DELAY_MS = 500;
+    private static final int SHUTDOWN_TIMEOUT_SECONDS = 5;
+    private static final int WATCH_POLL_TIMEOUT_MS = 200;
 
     private final Project project;
     private WatchService watchService;
@@ -132,7 +138,7 @@ public class FileWatcherService implements Disposable {
         while (running) {
             WatchKey key;
             try {
-                key = watchService.poll(200, TimeUnit.MILLISECONDS);
+                key = watchService.poll(WATCH_POLL_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 if (key == null) {
                     continue;
                 }
@@ -165,12 +171,16 @@ public class FileWatcherService implements Disposable {
                 if (checkResult.shouldProcess) {
                     // Format event type: CREATE/MODIFY/DELETE
                     String changeType = kind.name().replace("ENTRY_", "");
-                    LOG.info("Detected " + changeType + " in: " + fullPath + " [" + checkResult.matchedRule + "]");
-                    logToToolWindow(changeType, checkResult.matchedRule, fullPath.toString());
+                    String relativePath = getRelativePath(fullPath);
+                    LOG.info("Detected " + changeType + " in: " + relativePath + " [" + checkResult.matchedRule + "]");
+                    logToToolWindow(changeType, checkResult.matchedRule, relativePath);
                     hasRelevantChanges = true;
                 } else {
-                    // Log ignored event
-                    logIgnoredToToolWindow(checkResult.ignoreReason, "N/A", fullPath.toString());
+                    // Log ignored event only if there's a valid ignore reason
+                    if (checkResult.ignoreReason != null && !checkResult.ignoreReason.isEmpty()) {
+                        String relativePath = getRelativePath(fullPath);
+                        logIgnoredToToolWindow(checkResult.ignoreReason, checkResult.matchedRule != null ? checkResult.matchedRule : "N/A", relativePath);
+                    }
                 }
 
                 // If a new directory was created, register it for watching
@@ -215,6 +225,9 @@ public class FileWatcherService implements Disposable {
             FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
             ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
             String pathStr = path.toString();
+            if (pathStr.startsWith(project.getBasePath())) {
+                pathStr = pathStr.substring(project.getBasePath().length() + 1);
+            }
 
             // First, check ignored regex filters - if matches any, ignore the file
             String ignoredRegexFilters = settings.getIgnoredRegexFilters();
@@ -243,12 +256,6 @@ public class FileWatcherService implements Disposable {
             boolean hasIncludedRegex = regexFilters != null && !regexFilters.trim().isEmpty();
 
             // Apply checkbox filters - if enabled, check if they match and return immediately
-            if (settings.isInContent()) {
-                if (vFile != null && fileIndex.isInContent(vFile)) {
-                    return new FileCheckResult(true, "InContent", null);
-                }
-            }
-
             if (settings.isInSource()) {
                 if (vFile != null && fileIndex.isInSource(vFile)) {
                     return new FileCheckResult(true, "InSource", null);
@@ -264,6 +271,12 @@ public class FileWatcherService implements Disposable {
             if (settings.isInGeneratedSource()) {
                 if (vFile != null && fileIndex.isInGeneratedSources(vFile)) {
                     return new FileCheckResult(true, "InGeneratedSource", null);
+                }
+            }
+
+            if (settings.isInContent()) {
+                if (vFile != null && fileIndex.isInContent(vFile)) {
+                    return new FileCheckResult(true, "InProjectContent", null);
                 }
             }
 
@@ -296,27 +309,50 @@ public class FileWatcherService implements Disposable {
         return checkFile(path).shouldProcess;
     }
 
+    private String getRelativePath(Path fullPath) {
+        String basePath = project.getBasePath();
+        if (basePath != null) {
+            Path projectPath = Paths.get(basePath);
+            try {
+                Path relativePath = projectPath.relativize(fullPath);
+                return relativePath.toString();
+            } catch (IllegalArgumentException e) {
+                // Paths are not on the same file system, return full path
+                return fullPath.toString();
+            }
+        }
+        return fullPath.toString();
+    }
+
+    private FileWatcherToolWindowContent getToolWindowContent() {
+        ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(project);
+        ToolWindow toolWindow = toolWindowManager.getToolWindow(TOOL_WINDOW_ID);
+
+        if (toolWindow == null) {
+            LOG.warn("Tool window '" + TOOL_WINDOW_ID + "' not found");
+            return null;
+        }
+
+        Content content = toolWindow.getContentManager().getContent(0);
+        if (content == null) {
+            LOG.warn("Tool window content is null");
+            return null;
+        }
+
+        FileWatcherToolWindowContent toolWindowContent = content.getUserData(FileWatcherToolWindowFactory.TOOL_WINDOW_CONTENT_KEY);
+        if (toolWindowContent == null) {
+            LOG.warn("Tool window content not found in user data - tool window may not be initialized yet");
+        }
+
+        return toolWindowContent;
+    }
+
     private void logToToolWindow(String event, String triggeredBy, String filePath) {
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
-                ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(project);
-                ToolWindow toolWindow = toolWindowManager.getToolWindow("File Watcher");
-
-                if (toolWindow != null) {
-                    Content content = toolWindow.getContentManager().getContent(0);
-                    if (content != null) {
-                        FileWatcherToolWindowContent toolWindowContent = content.getUserData(FileWatcherToolWindowFactory.TOOL_WINDOW_CONTENT_KEY);
-
-                        if (toolWindowContent != null) {
-                            toolWindowContent.addEvent(event, triggeredBy, filePath);
-                        } else {
-                            LOG.warn("Tool window content not found in user data - tool window may not be initialized yet");
-                        }
-                    } else {
-                        LOG.warn("Tool window content is null");
-                    }
-                } else {
-                    LOG.warn("Tool window 'File Watcher' not found");
+                FileWatcherToolWindowContent content = getToolWindowContent();
+                if (content != null) {
+                    content.addEvent(event, triggeredBy, filePath);
                 }
             } catch (Exception e) {
                 LOG.warn("Error logging to tool window", e);
@@ -327,24 +363,9 @@ public class FileWatcherService implements Disposable {
     private void logIgnoredToToolWindow(String reason, String triggeredBy, String filePath) {
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
-                ToolWindowManager toolWindowManager = ToolWindowManager.getInstance(project);
-                ToolWindow toolWindow = toolWindowManager.getToolWindow("File Watcher");
-
-                if (toolWindow != null) {
-                    Content content = toolWindow.getContentManager().getContent(0);
-                    if (content != null) {
-                        FileWatcherToolWindowContent toolWindowContent = content.getUserData(FileWatcherToolWindowFactory.TOOL_WINDOW_CONTENT_KEY);
-
-                        if (toolWindowContent != null) {
-                            toolWindowContent.addIgnoredEvent(reason, triggeredBy, filePath);
-                        } else {
-                            LOG.warn("Tool window content not found in user data - tool window may not be initialized yet");
-                        }
-                    } else {
-                        LOG.warn("Tool window content is null");
-                    }
-                } else {
-                    LOG.warn("Tool window 'File Watcher' not found");
+                FileWatcherToolWindowContent content = getToolWindowContent();
+                if (content != null) {
+                    content.addIgnoredEvent(reason, triggeredBy, filePath);
                 }
             } catch (Exception e) {
                 LOG.warn("Error logging ignored event to tool window", e);
@@ -383,7 +404,7 @@ public class FileWatcherService implements Disposable {
                 ActionManager actionManager = ActionManager.getInstance();
 
                 // First, trigger synchronize to reload files from disk
-                AnAction syncAction = actionManager.getAction("Synchronize");
+                AnAction syncAction = actionManager.getAction(SYNC_ACTION_ID);
                 if (syncAction != null) {
                     LOG.warn("==> SYNCHRONIZE ACTION TRIGGERED - Reloading files from disk for project: " + project.getName());
 
@@ -406,7 +427,7 @@ public class FileWatcherService implements Disposable {
                     // Then trigger a project rebuild after sync completes if enabled in settings
                     FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
                     if (settings.isAutoRebuildEnabled()) {
-                        AnAction rebuildAction = actionManager.getAction("CompileDirty");
+                        AnAction rebuildAction = actionManager.getAction(BUILD_ACTION_ID);
                         if (rebuildAction != null) {
                             DataContext rebuildContext = dataId -> {
                                 if ("project".equals(dataId)) {
@@ -428,15 +449,15 @@ public class FileWatcherService implements Disposable {
                                     rebuildAction.actionPerformed(rebuildEvent);
                                     LOG.warn("==> REBUILD ACTION COMPLETED for project: " + project.getName());
                                 });
-                            }, 500, TimeUnit.MILLISECONDS);
+                            }, REBUILD_DELAY_MS, TimeUnit.MILLISECONDS);
                         } else {
-                            LOG.error("Could not find CompileDirty action for rebuild");
+                            LOG.error("Could not find " + BUILD_ACTION_ID + " action for rebuild");
                         }
                     } else {
                         LOG.info("Auto-rebuild is disabled in settings, skipping rebuild");
                     }
                 } else {
-                    LOG.error("Could not find Synchronize action");
+                    LOG.error("Could not find " + SYNC_ACTION_ID + " action");
                 }
             } catch (Exception e) {
                 LOG.error("Error triggering reload from disk", e);
@@ -459,7 +480,7 @@ public class FileWatcherService implements Disposable {
 
         debounceExecutor.shutdown();
         try {
-            if (!debounceExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+            if (!debounceExecutor.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
                 debounceExecutor.shutdownNow();
             }
         } catch (InterruptedException e) {

@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload.settings;
+package com.intellij.plugin.bfw.settings;
 
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.options.ConfigurationException;
@@ -23,7 +23,7 @@ public class FileWatcherConfigurable implements Configurable {
     @NlsContexts.ConfigurableName
     @Override
     public String getDisplayName() {
-        return "File Watcher Auto Reload";
+        return "Background File Watcher";
     }
 
     @Nullable

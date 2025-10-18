@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload.settings;
+package com.intellij.plugin.bfw.settings;
 
 import com.intellij.ide.BrowserUtil;
 import com.intellij.ui.components.JBCheckBox;
@@ -7,10 +7,10 @@ import com.intellij.ui.components.JBTextArea;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.ui.components.labels.LinkLabel;
 import com.intellij.util.ui.FormBuilder;
-import org.jetbrains.annotations.NotNull;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import java.awt.BorderLayout;
 
 public class FileWatcherSettingsComponent {
 
@@ -54,14 +54,14 @@ public class FileWatcherSettingsComponent {
                 .addVerticalGap(10)
                 .addComponent(new JBLabel("<html>Configure which files should trigger auto-reload and rebuild:</html>"), 0)
                 .addVerticalGap(5)
-                .addComponent(isInContent, 1)
-                .addTooltip("Include files that are part of the project content")
                 .addComponent(isInSource, 1)
                 .addTooltip("Include files in source directories (src/main/java, etc.)")
                 .addComponent(isInTestSource, 1)
                 .addTooltip("Include files in test source directories (src/test/java, etc.)")
                 .addComponent(isInGeneratedSource, 1)
                 .addTooltip("Include files in generated source directories")
+                .addComponent(isInContent, 1)
+                .addTooltip("Include files that are part of the project content")
                 .addVerticalGap(15)
                 .addComponent(new JBLabel("<html><b>Included Path Regex Filters</b></html>"), 0)
                 .addVerticalGap(5)

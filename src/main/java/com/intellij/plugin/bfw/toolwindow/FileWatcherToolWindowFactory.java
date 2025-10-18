@@ -1,4 +1,4 @@
-package com.intellij.plugin.forcereload.toolwindow;
+package com.intellij.plugin.bfw.toolwindow;
 
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;

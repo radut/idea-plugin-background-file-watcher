@@ -5,23 +5,17 @@ An IntelliJ IDEA plugin that watches files in the background and triggers "Synch
 ## Features
 
 - **Watches files in the background**: Monitors your project directory for file changes using Java's WatchService API
-- **Smart Filtering**: Uses IntelliJ's ProjectFileIndex to intelligently filter files
-  - Ignores build output directories (target, build, out, etc.)
-  - Focuses on actual source code and resource files
-  - Respects IntelliJ's project structure settings
 - **Configurable Filters**: Fine-tune which files trigger reloads
-  - Check if file is in project content
-  - Check if file is excluded
-  - Check if file is in source roots
-  - Check if file is in test source roots
-  - Check if file is in library
+  - Check if file is in source
+  - Check if file is in test source
+  - Check if file is in generated source
+  - Check if file is in project content 
 - **Regex Path Filters**: Define custom regex patterns to match specific file paths
 - **Auto Reload**: Automatically triggers "Synchronize All From Disk" when changes are detected
 - **Auto Rebuild**: Automatically triggers project build after synchronization
 - **Debouncing**: Configurable delay to batch multiple file changes (default: 500ms)
 - **Event Tracking**: Tool window showing:
-  - Processed events with timestamps and matched rules
-  - Ignored events with reasons
+  - Processed events/ignored events with timestamps and matched rules
 - **Project-Level Settings**: Each project has its own independent configuration stored in `.idea/workspace.xml`
 
 ## Building the Plugin
@@ -67,14 +61,14 @@ To test the plugin in a sandboxed IntelliJ IDEA instance:
 Navigate to **Settings/Preferences → Tools → File Watcher Auto Reload** to configure:
 
 1. **File Filtering Options**:
-   - Check is in content
-   - Check is excluded
    - Check is in source
    - Check is in test source
-   - Check is in library
-
-2. **Regex Path Filters**:
+   - Check is in generated source
+   - Check is in project content
+2. 
+3. **Regex Path Filters**:
    - Define custom regex patterns (one per line)
+   - Define ignore file patter regex
    - Patterns are validated on save
 
 3. **Auto Actions**:
@@ -86,10 +80,9 @@ Navigate to **Settings/Preferences → Tools → File Watcher Auto Reload** to c
 
 ## Tool Window
 
-The plugin adds a "File Watcher" tool window at the bottom of the IDE with two tabs:
+The plugin adds a "File Watcher" tool window at the bottom of the IDE:
 
-- **Processed Events**: Shows files that triggered reload/rebuild with matched rules and timestamps
-- **Ignored Events**: Shows files that were ignored with reasons and timestamps
+- **Processed Events**: Shows files that triggered reload/rebuild with matched rules and timestamps so that you can adjust your regex to meet your demands
 
 ## Use Cases
 

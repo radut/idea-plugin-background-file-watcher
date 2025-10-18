@@ -1,14 +1,12 @@
 <idea-plugin>
-    <id>com.intellij.plugin.forcereload</id>
+    <id>com.intellij.plugin.bfw</id>
     <name>Background File Watcher</name>
     <vendor email="support@example.com" url="http://www.example.com">Example Vendor</vendor>
 
     <description><![CDATA[
     Automatically watches project source and resource files for external changes and triggers
-    IntelliJ's "Reload All From Disk" action when changes are detected.
+    IntelliJ's "Reload All From Disk" and "Build" action when changes are detected.
     This is useful when files are being modified by external tools or processes.
-
-    The plugin ignores build output directories and only watches actual source code and resource files.
 
     <br/><br/>
     <b>Support Development:</b><br/>
@@ -20,22 +18,22 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <!-- Project-level service for file watching -->
-        <projectService serviceImplementation="com.intellij.plugin.forcereload.FileWatcherService"/>
+        <projectService serviceImplementation="com.intellij.plugin.bfw.FileWatcherService"/>
         <!-- Startup activity to initialize file watcher -->
-        <postStartupActivity implementation="com.intellij.plugin.forcereload.ProjectOpenListener"/>
+        <postStartupActivity implementation="com.intellij.plugin.bfw.ProjectOpenListener"/>
         <!-- Project-level settings service (stored in .idea folder) -->
-        <projectService serviceImplementation="com.intellij.plugin.forcereload.settings.FileWatcherSettings"/>
+        <projectService serviceImplementation="com.intellij.plugin.bfw.settings.FileWatcherSettings"/>
         <!-- Settings UI -->
         <projectConfigurable
                 parentId="tools"
-                instance="com.intellij.plugin.forcereload.settings.FileWatcherConfigurable"
-                id="com.intellij.plugin.forcereload.settings.FileWatcherConfigurable"
-                displayName="File Watcher Auto Reload"/>
+                instance="com.intellij.plugin.bfw.settings.FileWatcherConfigurable"
+                id="com.intellij.plugin.bfw.settings.FileWatcherConfigurable"
+                displayName="Background File Watcher"/>
         <!-- Tool Window -->
         <toolWindow
                 id="File Watcher"
                 anchor="bottom"
-                factoryClass="com.intellij.plugin.forcereload.toolwindow.FileWatcherToolWindowFactory"
+                factoryClass="com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowFactory"
                 icon="AllIcons.Actions.Refresh"/>
     </extensions>
 </idea-plugin>
