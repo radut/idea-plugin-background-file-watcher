@@ -7,8 +7,12 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.module.Module;
+import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.ProjectFileIndex;
+import com.intellij.openapi.roots.SourceFolder;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.wm.ToolWindow;
@@ -17,7 +21,9 @@ import com.intellij.plugin.bfw.settings.FileWatcherSettings;
 import com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowContent;
 import com.intellij.plugin.bfw.toolwindow.FileWatcherToolWindowFactory;
 import com.intellij.ui.content.Content;
+import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.jps.model.java.JavaSourceRootType;
 
 import java.io.IOException;
 import java.nio.file.FileSystems;
@@ -31,6 +37,8 @@ import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -168,18 +176,20 @@ public class FileWatcherService implements Disposable {
 
                 // Check if this file should trigger a reload
                 FileCheckResult checkResult = checkFile(fullPath);
+                String changeType = kind.name().replace("ENTRY_", "");
                 if (checkResult.shouldProcess) {
                     // Format event type: CREATE/MODIFY/DELETE
-                    String changeType = kind.name().replace("ENTRY_", "");
                     String relativePath = getRelativePath(fullPath);
                     LOG.info("Detected " + changeType + " in: " + relativePath + " [" + checkResult.matchedRule + "]");
-                    logToToolWindow(changeType, checkResult.matchedRule, relativePath);
+                    logToToolWindow(changeType, checkResult.matchedRule, checkResult.details, relativePath);
                     hasRelevantChanges = true;
                 } else {
                     // Log ignored event only if there's a valid ignore reason
-                    if (checkResult.ignoreReason != null && !checkResult.ignoreReason.isEmpty()) {
+                    if (checkResult.details != null && !checkResult.details.isEmpty()) {
                         String relativePath = getRelativePath(fullPath);
-                        logIgnoredToToolWindow(checkResult.ignoreReason, checkResult.matchedRule != null ? checkResult.matchedRule : "N/A", relativePath);
+                        logIgnoredToToolWindow(changeType, checkResult.matchedRule != null ? checkResult.matchedRule : "N/A",
+                                checkResult.details,
+                                relativePath);
                     }
                 }
 
@@ -207,23 +217,89 @@ public class FileWatcherService implements Disposable {
     private static class FileCheckResult {
         boolean shouldProcess;
         String matchedRule;
-        String ignoreReason;
+        String details;
 
-        FileCheckResult(boolean shouldProcess, String matchedRule, String ignoreReason) {
+        FileCheckResult(boolean shouldProcess, String matchedRule, String details) {
             this.shouldProcess = shouldProcess;
             this.matchedRule = matchedRule;
-            this.ignoreReason = ignoreReason;
+            this.details = details;
         }
     }
 
-    private FileCheckResult checkFile(Path path) {
-        // This method needs read access to query VFS
-        return ApplicationManager.getApplication().runReadAction((com.intellij.openapi.util.Computable<FileCheckResult>) () -> {
-            // Use IntelliJ's ProjectFileIndex to determine if file is part of the project
-            VirtualFile vFile = VirtualFileManager.getInstance().findFileByNioPath(path);
+    private List<VirtualFile> getSourceRoots() {
+        List<VirtualFile> roots = new ArrayList<>();
+        ModuleManager moduleManager = ModuleManager.getInstance(project);
+        for (Module module : moduleManager.getModules()) {
+            ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
+            for (var contentEntry : rootManager.getContentEntries()) {
+                for (SourceFolder sourceFolder : contentEntry.getSourceFolders()) {
+                    if (sourceFolder.getRootType() == JavaSourceRootType.SOURCE) {
+                        VirtualFile file = sourceFolder.getFile();
+                        if (file != null) {
+                            roots.add(file);
+                        }
+                    }
+                }
+            }
+        }
+        return roots;
+    }
 
+    private List<VirtualFile> getTestSourceRoots() {
+        List<VirtualFile> roots = new ArrayList<>();
+        ModuleManager moduleManager = ModuleManager.getInstance(project);
+        for (Module module : moduleManager.getModules()) {
+            ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
+            for (var contentEntry : rootManager.getContentEntries()) {
+                for (SourceFolder sourceFolder : contentEntry.getSourceFolders()) {
+                    if (sourceFolder.getRootType() == JavaSourceRootType.TEST_SOURCE) {
+                        VirtualFile file = sourceFolder.getFile();
+                        if (file != null) {
+                            roots.add(file);
+                        }
+                    }
+                }
+            }
+        }
+        return roots;
+    }
+
+    private List<VirtualFile> getGeneratedSourceRoots() {
+        List<VirtualFile> roots = new ArrayList<>();
+        ModuleManager moduleManager = ModuleManager.getInstance(project);
+        for (Module module : moduleManager.getModules()) {
+            ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
+            for (VirtualFile root : rootManager.getSourceRoots(false)) {
+                if (root.getPath().contains("generated")) {
+                    roots.add(root);
+                }
+            }
+        }
+        return roots;
+    }
+
+    private List<VirtualFile> getContentRoots() {
+        List<VirtualFile> roots = new ArrayList<>();
+        ModuleManager moduleManager = ModuleManager.getInstance(project);
+        for (Module module : moduleManager.getModules()) {
+            ModuleRootManager rootManager = ModuleRootManager.getInstance(module);
+            for (VirtualFile contentRoot : rootManager.getContentRoots()) {
+                roots.add(contentRoot);
+            }
+        }
+        return roots;
+    }
+
+    private boolean isPathUnderRoot(Path path, VirtualFile root) {
+        String pathStr = path.toString();
+        String rootPath = root.getPath();
+        return pathStr.startsWith(rootPath);
+    }
+
+    private FileCheckResult checkFile(Path path) {
+        // This method needs read action to query VFS
+        return ApplicationManager.getApplication().runReadAction((com.intellij.openapi.util.Computable<FileCheckResult>) () -> {
             FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
-            ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
             String pathStr = path.toString();
             if (pathStr.startsWith(project.getBasePath())) {
                 pathStr = pathStr.substring(project.getBasePath().length() + 1);
@@ -242,7 +318,7 @@ public class FileWatcherService implements Disposable {
                     try {
                         Pattern pattern = Pattern.compile(patternStr);
                         if (pattern.matcher(pathStr).find()) {
-                            return new FileCheckResult(false, "Ignore Regex", "Matched ignored regex: " + patternStr);
+                            return new FileCheckResult(false, "Ignore Regex", patternStr);
                         }
                     } catch (PatternSyntaxException e) {
                         LOG.warn("Invalid ignored regex pattern: " + patternStr, e);
@@ -250,33 +326,41 @@ public class FileWatcherService implements Disposable {
                 }
             }
 
-
             // Check if included regex is configured
             String regexFilters = settings.getPathRegexFilters();
             boolean hasIncludedRegex = regexFilters != null && !regexFilters.trim().isEmpty();
 
-            // Apply checkbox filters - if enabled, check if they match and return immediately
+
+            if (settings.isInGeneratedSource()) {
+                for (VirtualFile root : getGeneratedSourceRoots()) {
+                    if (isPathUnderRoot(path, root)) {
+                        return new FileCheckResult(true, "InGeneratedSource", null);
+                    }
+                }
+            }
+
             if (settings.isInSource()) {
-                if (vFile != null && fileIndex.isInSource(vFile)) {
-                    return new FileCheckResult(true, "InSource", null);
+                for (VirtualFile root : getSourceRoots()) {
+                    if (isPathUnderRoot(path, root)) {
+                        return new FileCheckResult(true, "InSource", null);
+                    }
                 }
             }
 
             if (settings.isInTestSource()) {
-                if (vFile != null && fileIndex.isInTestSourceContent(vFile)) {
-                    return new FileCheckResult(true, "InTestSource", null);
+                for (VirtualFile root : getTestSourceRoots()) {
+                    if (isPathUnderRoot(path, root)) {
+                        return new FileCheckResult(true, "InTestSource", null);
+                    }
                 }
             }
 
-            if (settings.isInGeneratedSource()) {
-                if (vFile != null && fileIndex.isInGeneratedSources(vFile)) {
-                    return new FileCheckResult(true, "InGeneratedSource", null);
-                }
-            }
 
             if (settings.isInContent()) {
-                if (vFile != null && fileIndex.isInContent(vFile)) {
-                    return new FileCheckResult(true, "InProjectContent", null);
+                for (VirtualFile root : getContentRoots()) {
+                    if (isPathUnderRoot(path, root)) {
+                        return new FileCheckResult(true, "InProjectContent", null);
+                    }
                 }
             }
 
@@ -347,12 +431,12 @@ public class FileWatcherService implements Disposable {
         return toolWindowContent;
     }
 
-    private void logToToolWindow(String event, String triggeredBy, String filePath) {
+    private void logToToolWindow(String event, String matchedRule, String details, String filePath) {
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
                 FileWatcherToolWindowContent content = getToolWindowContent();
                 if (content != null) {
-                    content.addEvent(event, triggeredBy, filePath);
+                    content.addEvent(true, event, matchedRule + (StringUtils.isNotBlank(details) ? ": " + details : ""), filePath);
                 }
             } catch (Exception e) {
                 LOG.warn("Error logging to tool window", e);
@@ -360,12 +444,12 @@ public class FileWatcherService implements Disposable {
         });
     }
 
-    private void logIgnoredToToolWindow(String reason, String triggeredBy, String filePath) {
+    private void logIgnoredToToolWindow(String event, String matchedRule, String details, String filePath) {
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
                 FileWatcherToolWindowContent content = getToolWindowContent();
                 if (content != null) {
-                    content.addIgnoredEvent(reason, triggeredBy, filePath);
+                    content.addEvent(false, event, matchedRule + (StringUtils.isNotBlank(details) ? ": " + details : ""), filePath);
                 }
             } catch (Exception e) {
                 LOG.warn("Error logging ignored event to tool window", e);
