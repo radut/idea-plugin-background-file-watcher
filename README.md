@@ -73,7 +73,7 @@ Track file changes and see which rules matched in real-time:
 
 ## Configuration
 
-Navigate to **Settings/Preferences → Tools → File Watcher Auto Reload** to configure:
+Navigate to **Settings/Preferences → Tools → Background File Watcher** to configure:
 
 1. **File Filtering Options**:
    - Check is in source
