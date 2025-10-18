@@ -5,6 +5,7 @@ import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
@@ -501,13 +502,7 @@ public class FileWatcherService implements Disposable {
                         return null;
                     };
 
-                    AnActionEvent syncEvent = AnActionEvent.createFromDataContext(
-                            "Background Action",
-                            null,
-                            dataContext
-                    );
-
-                    syncAction.actionPerformed(syncEvent);
+                    ActionUtil.invokeAction(syncAction, dataContext, "Background Action", null, null);
                     LOG.warn("==> SYNCHRONIZE ACTION COMPLETED for project: " + project.getName());
 
                     // Then trigger a project rebuild after sync completes if enabled in settings
@@ -522,17 +517,11 @@ public class FileWatcherService implements Disposable {
                                 return null;
                             };
 
-                            AnActionEvent rebuildEvent = AnActionEvent.createFromDataContext(
-                                    "Background Action",
-                                    null,
-                                    rebuildContext
-                            );
-
                             // Schedule rebuild slightly after sync completes
                             debounceExecutor.schedule(() -> {
                                 ApplicationManager.getApplication().invokeLater(() -> {
                                     LOG.warn("==> REBUILD ACTION TRIGGERED - Starting project rebuild for: " + project.getName());
-                                    rebuildAction.actionPerformed(rebuildEvent);
+                                    ActionUtil.invokeAction(rebuildAction, rebuildContext, "Background Action", null, null);
                                     LOG.warn("==> REBUILD ACTION COMPLETED for project: " + project.getName());
                                 });
                             }, REBUILD_DELAY_MS, TimeUnit.MILLISECONDS);
