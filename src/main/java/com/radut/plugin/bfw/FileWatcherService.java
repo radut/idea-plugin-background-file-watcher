@@ -502,7 +502,14 @@ public class FileWatcherService implements Disposable {
                         return null;
                     };
 
-                    ActionUtil.invokeAction(syncAction, dataContext, "Background Action", null, null);
+                    AnActionEvent syncEvent = AnActionEvent.createFromAnAction(
+                            syncAction,
+                            null,
+                            "Background Action",
+                            dataContext
+                    );
+
+                    ActionUtil.performActionDumbAwareWithCallbacks(syncAction, syncEvent);
                     LOG.warn("==> SYNCHRONIZE ACTION COMPLETED for project: " + project.getName());
 
                     // Then trigger a project rebuild after sync completes if enabled in settings
@@ -521,7 +528,15 @@ public class FileWatcherService implements Disposable {
                             debounceExecutor.schedule(() -> {
                                 ApplicationManager.getApplication().invokeLater(() -> {
                                     LOG.warn("==> REBUILD ACTION TRIGGERED - Starting project rebuild for: " + project.getName());
-                                    ActionUtil.invokeAction(rebuildAction, rebuildContext, "Background Action", null, null);
+
+                                    AnActionEvent rebuildEvent = AnActionEvent.createFromAnAction(
+                                            rebuildAction,
+                                            null,
+                                            "Background Action",
+                                            rebuildContext
+                                    );
+
+                                    ActionUtil.performActionDumbAwareWithCallbacks(rebuildAction, rebuildEvent);
                                     LOG.warn("==> REBUILD ACTION COMPLETED for project: " + project.getName());
                                 });
                             }, REBUILD_DELAY_MS, TimeUnit.MILLISECONDS);
