@@ -1,20 +1,22 @@
 package com.radut.plugin.bfw.actions;
 
+import com.intellij.openapi.actionSystem.ActionUpdateThread;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
+import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.radut.plugin.bfw.FileWatcherService;
 import com.radut.plugin.bfw.Icons;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Collections;
-import java.util.Set;
-import java.util.WeakHashMap;
+public class ToggleFileWatcherAction extends AnAction implements DumbAware {
 
-public class ToggleFileWatcherAction extends AnAction {
-
-    // Track which projects have registered listeners (using WeakHashMap for automatic cleanup)
-    private final Set<Project> registeredProjects = Collections.newSetFromMap(new WeakHashMap<>());
+    @Override
+    public @NotNull ActionUpdateThread getActionUpdateThread() {
+        // update() only reads the service state, so it must not occupy the EDT.
+        return ActionUpdateThread.BGT;
+    }
 
     @Override
     public void actionPerformed(@NotNull AnActionEvent e) {
@@ -35,21 +37,11 @@ public class ToggleFileWatcherAction extends AnAction {
     @Override
     public void update(@NotNull AnActionEvent e) {
         Project project = e.getProject();
-        if (project == null) {
-            e.getPresentation().setEnabled(false);
-            return;
-        }
+        FileWatcherService service = project == null ? null : project.getService(FileWatcherService.class);
 
-        FileWatcherService service = project.getService(FileWatcherService.class);
         if (service == null) {
             e.getPresentation().setEnabled(false);
             return;
-        }
-
-        // Register listener for this project if not already registered
-        if (!registeredProjects.contains(project)) {
-            service.addStateChangeListener(() -> updateIcon(service));
-            registeredProjects.add(project);
         }
 
         e.getPresentation().setEnabled(true);
@@ -58,12 +50,7 @@ public class ToggleFileWatcherAction extends AnAction {
         updatePresentationState(e.getPresentation(), service);
     }
 
-    private void updateIcon(FileWatcherService service) {
-
-        updatePresentationState(getTemplatePresentation(), service);
-    }
-
-    private void updatePresentationState(com.intellij.openapi.actionSystem.Presentation presentation, FileWatcherService service) {
+    private void updatePresentationState(Presentation presentation, FileWatcherService service) {
         if (service.isRunning()) {
             presentation.setText("Disable File Watching");
             presentation.setDescription("Stop watching files for changes");

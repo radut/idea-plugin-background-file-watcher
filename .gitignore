@@ -148,3 +148,6 @@ gradle-app.setting
 # End of https://www.toptal.com/developers/gitignore/api/gradle
 
 .claude
+
+# IntelliJ Platform Gradle Plugin 2.x sandbox / caches
+.intellijPlatform/

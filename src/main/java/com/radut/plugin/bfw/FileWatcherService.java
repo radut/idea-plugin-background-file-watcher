@@ -2,8 +2,13 @@ package com.radut.plugin.bfw;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
+import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.AnAction;
+import com.intellij.openapi.actionSystem.DataContext;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
+import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
@@ -20,7 +25,6 @@ import com.radut.plugin.bfw.settings.FileWatcherState;
 import com.radut.plugin.bfw.toolwindow.FileWatcherToolWindowContent;
 import com.radut.plugin.bfw.toolwindow.FileWatcherToolWindowFactory;
 import com.radut.plugin.bfw.watcher.RecursiveDirectoryWatcher;
-import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
 
@@ -409,8 +413,9 @@ public class FileWatcherService implements Disposable {
         return ApplicationManager.getApplication().runReadAction((Computable<FileCheckResult>) () -> {
             FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
             String pathStr = path.toString();
-            if (pathStr.startsWith(project.getBasePath())) {
-                pathStr = pathStr.substring(project.getBasePath().length() + 1);
+            String basePath = project.getBasePath();
+            if (basePath != null && pathStr.startsWith(basePath)) {
+                pathStr = pathStr.substring(basePath.length() + 1);
             }
 
             // Check ignored regex filters first
@@ -432,7 +437,7 @@ public class FileWatcherService implements Disposable {
                     && !fileIsPartOf(path, getTestSourceRoots())
                     && !fileIsPartOf(path, getExcludedFolders())) {
 
-                    if (StringUtils.isNotBlank(settings.getPathRegexFilters())) {
+                    if (isNotBlank(settings.getPathRegexFilters())) {
                         // Apply included regex filters
                         String includedMatch = matchesAnyPattern(pathStr, settings.getPathRegexFilters());
                         if (includedMatch != null) {
@@ -496,7 +501,7 @@ public class FileWatcherService implements Disposable {
             try {
                 FileWatcherToolWindowContent content = getToolWindowContent();
                 if (content != null) {
-                    content.addEvent(true, event, matchedRule + (StringUtils.isNotBlank(details) ? ": " + details : ""), filePath);
+                    content.addEvent(true, event, matchedRule + (isNotBlank(details) ? ": " + details : ""), filePath);
                 }
             } catch (Exception e) {
                 LOG.warn("Error logging to tool window", e);
@@ -509,7 +514,7 @@ public class FileWatcherService implements Disposable {
             try {
                 FileWatcherToolWindowContent content = getToolWindowContent();
                 if (content != null) {
-                    content.addEvent(false, event, matchedRule + (StringUtils.isNotBlank(details) ? ": " + details : ""), filePath);
+                    content.addEvent(false, event, matchedRule + (isNotBlank(details) ? ": " + details : ""), filePath);
                 }
             } catch (Exception e) {
                 LOG.warn("Error logging ignored event to tool window", e);
@@ -547,21 +552,35 @@ public class FileWatcherService implements Disposable {
     }
 
     private void triggerAction(String actionId) {
+        if (project.isDisposed()) {
+            return;
+        }
         ApplicationManager.getApplication().invokeLater(() -> {
             try {
-                ActionManager actionManager = ActionManager.getInstance();
-                AnAction action = actionManager.getAction(actionId);
-                if (action != null) {
-                    LOG.warn("==> " + actionId + " ACTION TRIGGERED - Starting for project: " + project.getName());
-                    ActionManager.getInstance().tryToExecute(action, null, null, "Background Action", true);
-                    LOG.warn("==> " + actionId + " COMPLETED for project: " + project.getName());
-                } else {
+                AnAction action = ActionManager.getInstance().getAction(actionId);
+                if (action == null) {
                     LOG.error("Could not find " + actionId + " action");
+                    return;
                 }
+                LOG.warn("==> " + actionId + " ACTION TRIGGERED - Starting for project: " + project.getName());
+                // Hand the action an explicit project context instead of letting the platform
+                // derive one from the focused component: the whole point of this plugin is to
+                // react while the IDE window sits in the background, where nothing has focus.
+                DataContext dataContext = SimpleDataContext.getProjectContext(project);
+                // Deprecated since 2024.3 in favour of overloads that do not exist on our
+                // since-build floor (233). It is the only variant available across the whole
+                // supported range, so keep it until the floor moves past 243.
+                ActionUtil.invokeAction(action, dataContext, ActionPlaces.UNKNOWN, null, null);
+                LOG.warn("==> " + actionId + " COMPLETED for project: " + project.getName());
             } catch (Exception e) {
                 LOG.error("Error Triggering " + actionId, e);
             }
-        });
+            // A background file change must not wait for a modal dialog to be dismissed.
+        }, ModalityState.nonModal(), project.getDisposed());
+    }
+
+    private static boolean isNotBlank(String value) {
+        return value != null && !value.isBlank();
     }
 
     @Override

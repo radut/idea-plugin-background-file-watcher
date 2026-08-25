@@ -37,8 +37,9 @@ public class RecursiveDirectoryWatcher {
     private Thread watchThread;
     private volatile boolean running = false;
 
-    // Maps to track registered directories
-    private final Map<WatchKey, Path> watchKeyToPath = new ConcurrentHashMap<>();
+    // Registered directories. The reverse direction is deliberately not cached: a polled key is
+    // not necessarily the same object register() handed back, so key -> path lookups miss (and
+    // would grow without bound). WatchKey.watchable() is the authoritative answer instead.
     private final Map<Path, WatchKey> pathToWatchKey = new ConcurrentHashMap<>();
 
     // Map to track all files and subdirectories within each watched directory
@@ -127,7 +128,6 @@ public class RecursiveDirectoryWatcher {
         }
 
         // Clear tracking maps
-        watchKeyToPath.clear();
         pathToWatchKey.clear();
         directoryContents.clear();
 
@@ -180,7 +180,6 @@ public class RecursiveDirectoryWatcher {
                 StandardWatchEventKinds.ENTRY_DELETE,
                 StandardWatchEventKinds.ENTRY_MODIFY);
 
-        watchKeyToPath.put(key, dir);
         pathToWatchKey.put(dir, key);
 
         // Scan and track all files and subdirectories in this directory
@@ -195,7 +194,6 @@ public class RecursiveDirectoryWatcher {
     private void unregisterDirectory(Path dir) {
         WatchKey key = pathToWatchKey.remove(dir);
         if (key != null) {
-            watchKeyToPath.remove(key);
             key.cancel();
             LOG.info("Unregistered directory: " + dir);
         }
@@ -298,9 +296,9 @@ public class RecursiveDirectoryWatcher {
                     break;
                 }
 
-                Path dir = watchKeyToPath.get(key);
+                Path dir = resolveWatchedDirectory(key);
                 if (dir == null) {
-                    LOG.warn("Watch key not found in map, cancelling key");
+                    LOG.warn("Watch key without a resolvable directory, cancelling key: " + key.watchable());
                     key.cancel();
                     continue;
                 }
@@ -318,7 +316,11 @@ public class RecursiveDirectoryWatcher {
                         @SuppressWarnings("unchecked")
                         WatchEvent<Path> pathEvent = (WatchEvent<Path>) event;
                         Path fileName = pathEvent.context();
-                        Path fullPath = dir.resolve(fileName);
+                        // Resolve through the name, not the Path object: the event context can
+                        // come from a different NIO provider than our paths (the IDE installs
+                        // its own default FileSystemProvider), and mixing the two throws
+                        // ProviderMismatchException.
+                        Path fullPath = dir.resolve(fileName.toString());
 
                         // Handle CREATE events
                         if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
@@ -396,35 +398,35 @@ public class RecursiveDirectoryWatcher {
 
                     }
 
+                } catch (Exception e) {
+                    // Never let a single bad event tear down the whole watcher: the thread
+                    // dying here means the project silently stops being watched.
+                    LOG.warn("Error processing watch events for: " + dir, e);
                 } finally {
                     boolean valid = key.reset();
                     if (!valid) {
                         // Directory is no longer accessible
-                        Path removed = watchKeyToPath.remove(key);
-                        if (removed != null) {
-                            Path fullPath = dir.resolve(removed);
-                            if (!shouldExclude(fullPath)) {
-                                if (directoryContents.containsKey(fullPath)) {
-                                    List<Path> allChildren = getAllChildren(fullPath);
-                                    // If it had children, notify about each child
-                                    for (Path child : allChildren) {
-                                        untrackChild(child.getParent(), child);
-                                        notifyListener(StandardWatchEventKinds.ENTRY_DELETE, child);
-                                    }
+                        pathToWatchKey.remove(dir);
+                        if (!shouldExclude(dir)) {
+                            if (directoryContents.containsKey(dir)) {
+                                List<Path> allChildren = getAllChildren(dir);
+                                // If it had children, notify about each child
+                                for (Path child : allChildren) {
+                                    untrackChild(child.getParent(), child);
+                                    notifyListener(StandardWatchEventKinds.ENTRY_DELETE, child);
                                 }
-                                Set<Path> paths = directoryContents.get(fullPath.getParent());
-                                if (paths != null) {
-                                    if (paths.contains(fullPath)) {
-                                        untrackChild(fullPath.getParent(), fullPath);
-                                        notifyListener(StandardWatchEventKinds.ENTRY_DELETE, fullPath);
-                                    }
-                                }
-
-                                // Clean up directory contents tracking
-                                directoryContents.remove(fullPath);
                             }
+                            Set<Path> paths = directoryContents.get(dir.getParent());
+                            if (paths != null) {
+                                if (paths.contains(dir)) {
+                                    untrackChild(dir.getParent(), dir);
+                                    notifyListener(StandardWatchEventKinds.ENTRY_DELETE, dir);
+                                }
+                            }
+
+                            // Clean up directory contents tracking
+                            directoryContents.remove(dir);
                         }
-                        pathToWatchKey.values().remove(key);
                         LOG.info("Watch key no longer valid for: " + dir);
                     }
 
@@ -436,6 +438,31 @@ public class RecursiveDirectoryWatcher {
         }
     }
 
+
+    /**
+     * Re-anchors a path onto the same FileSystem as the watched root. Paths handed back by the
+     * WatchService may belong to the platform provider while ours belong to the provider the IDE
+     * installs as default; comparing or resolving across the two silently misbehaves.
+     */
+    private Path toLocalPath(Path other) {
+        if (other.getFileSystem() == rootPath.getFileSystem()) {
+            return other;
+        }
+        return rootPath.getFileSystem().getPath(other.toString());
+    }
+
+    /**
+     * Resolves the directory a polled key belongs to. The key is asked directly rather than looked
+     * up in a map: register() and poll() do not necessarily deal in the same key objects once the
+     * IDE installs its own default FileSystemProvider, so a map lookup misses and the old code
+     * then cancelled a perfectly live key - which silently stopped watching that directory.
+     */
+    private Path resolveWatchedDirectory(WatchKey key) {
+        if (key.watchable() instanceof Path watched) {
+            return toLocalPath(watched);
+        }
+        return null;
+    }
 
     private void notifyListener(final WatchEvent.Kind<?> kind, final Path fileName) {
 

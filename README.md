@@ -21,6 +21,11 @@ An IntelliJ IDEA plugin that watches files in the background and triggers "Synch
   - Processed events/ignored events with timestamps and matched rules
 - **Project-Level Settings**: Each project has its own independent configuration stored in `.idea/workspace.xml`
 
+## Compatibility
+
+Requires IntelliJ IDEA 2023.3 (build 233) or newer. No upper bound is declared, so the plugin
+keeps working on future IDE releases instead of being disabled when a new major version ships.
+
 ## Building the Plugin
 
 To build the plugin, you need:
@@ -33,6 +38,11 @@ Build the plugin:
 ```
 
 The built plugin will be in `build/distributions/`.
+
+Check binary compatibility against every supported IDE release:
+```bash
+./gradlew verifyPlugin
+```
 
 ## Installing the Plugin
 
@@ -47,6 +57,12 @@ The built plugin will be in `build/distributions/`.
 To test the plugin in a sandboxed IntelliJ IDEA instance:
 ```bash
 ./gradlew runIde
+```
+
+`runIde` uses the compatibility floor (2023.3). To smoke-test on a newer IDE, and optionally open
+a project straight away:
+```bash
+./gradlew runIdeOn -PideVersion=2026.1.5 -PideProject=/path/to/some/project
 ```
 
 ## How It Works
