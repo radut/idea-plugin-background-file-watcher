@@ -4,9 +4,6 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.ActionPlaces;
 import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.DataContext;
-import com.intellij.openapi.actionSystem.ex.ActionUtil;
-import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.diagnostic.Logger;
@@ -19,6 +16,7 @@ import com.intellij.openapi.util.Computable;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
+import com.intellij.openapi.wm.WindowManager;
 import com.intellij.ui.content.Content;
 import com.radut.plugin.bfw.settings.FileWatcherSettings;
 import com.radut.plugin.bfw.settings.FileWatcherState;
@@ -27,6 +25,8 @@ import com.radut.plugin.bfw.toolwindow.FileWatcherToolWindowFactory;
 import com.radut.plugin.bfw.watcher.RecursiveDirectoryWatcher;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.model.java.JavaSourceRootType;
+
+import javax.swing.JFrame;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -562,15 +562,19 @@ public class FileWatcherService implements Disposable {
                     LOG.error("Could not find " + actionId + " action");
                     return;
                 }
+                // Anchor the action's data context on the project frame rather than letting the
+                // platform derive one from the focused component: the whole point of this plugin
+                // is to react while the IDE window sits in the background, where nothing has
+                // focus. tryToExecute() builds the context from this component when it is given
+                // one, and is the only action-invoking API that is not deprecated anywhere in
+                // the 233..262 range we support.
+                JFrame frame = WindowManager.getInstance().getFrame(project);
+                if (frame == null) {
+                    LOG.warn("No frame for project " + project.getName() + ", skipping " + actionId);
+                    return;
+                }
                 LOG.warn("==> " + actionId + " ACTION TRIGGERED - Starting for project: " + project.getName());
-                // Hand the action an explicit project context instead of letting the platform
-                // derive one from the focused component: the whole point of this plugin is to
-                // react while the IDE window sits in the background, where nothing has focus.
-                DataContext dataContext = SimpleDataContext.getProjectContext(project);
-                // Deprecated since 2024.3 in favour of overloads that do not exist on our
-                // since-build floor (233). It is the only variant available across the whole
-                // supported range, so keep it until the floor moves past 243.
-                ActionUtil.invokeAction(action, dataContext, ActionPlaces.UNKNOWN, null, null);
+                ActionManager.getInstance().tryToExecute(action, null, frame, ActionPlaces.UNKNOWN, true);
                 LOG.warn("==> " + actionId + " COMPLETED for project: " + project.getName());
             } catch (Exception e) {
                 LOG.error("Error Triggering " + actionId, e);

@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.radut.plugin"
-version = "1.1.0"
+version = "1.1.1"
 
 // Platform we compile against. Keep this at the OLDEST supported IDE so we can never
 // accidentally call an API that does not exist on it; forward compatibility is proven
@@ -86,7 +86,7 @@ tasks {
 // Smoke-test the plugin on an IDE newer than the one we compile against, e.g.
 //   ./gradlew runIdeOn -PideVersion=2026.1.5 -PideProject=/path/to/some/project
 // Handy because `runIde` always uses `platformVersion`, our compatibility floor.
-val runIdeOn by intellijPlatformTesting.runIde.registering {
+intellijPlatformTesting.runIde.register("runIdeOn") {
     type = IntelliJPlatformType.IntellijIdea
     version = providers.gradleProperty("ideVersion").orElse("2026.1.5")
     task {
