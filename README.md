@@ -16,7 +16,7 @@ An IntelliJ IDEA plugin that watches files in the background and triggers "Synch
 - **Regex Path Filters**: Define custom regex patterns to match specific file paths
 - **Auto Reload**: Automatically triggers "Synchronize All From Disk" when changes are detected
 - **Auto Rebuild**: Automatically triggers project build after synchronization
-- **Debouncing**: Configurable delay to batch multiple file changes (default: 500ms)
+- **Debouncing**: Actions run once changes have been quiet for the configured delay (default: 500ms)
 - **Event Tracking**: Tool window showing:
   - Processed events/ignored events with timestamps and matched rules
 - **Project-Level Settings**: Each project has its own independent configuration stored in `.idea/workspace.xml`
@@ -67,13 +67,13 @@ a project straight away:
 
 ## How It Works
 
-1. When a project is opened, the `ProjectOpenListener` is triggered
-2. The `FileWatcherService` is initialized and starts watching the project directory
-3. The service recursively registers watchers for all directories except excluded ones (using IntelliJ's ProjectFileIndex)
-4. When a file change is detected, it checks against configured filters and regex patterns
-5. If relevant changes are detected, it schedules a reload (with configurable debounce delay)
-6. The reload triggers IntelliJ's synchronization action to refresh files from disk
-7. Optionally triggers a project rebuild after synchronization
+1. When a project is opened, `ProjectOpenListener` starts the `FileWatcherService` if watching was enabled for that project
+2. The service takes a snapshot of the module roots (source, test source, content, excluded) and derives the directories to watch from it and from the settings
+3. One `RecursiveDirectoryWatcher` per project subscribes those directories with a single `WatchService` and a single thread; the deepest matching root or exclusion decides, so a generated source root inside an excluded `build` directory is still watched
+4. Directories that get created are subscribed on the fly, directories that disappear are unsubscribed; when the project structure or the settings change only the directories whose membership changed are touched
+5. Every event is classified against the cached roots and the compiled regex filters, then logged to the tool window
+6. Events that pass the filters (re)arm the debounce timer; the actions run once the changes have been quiet for the configured delay
+7. The reload refreshes the VFS from disk, and the build is started only after that refresh has finished
 
 ## Screenshots
 
@@ -128,7 +128,7 @@ This plugin is particularly useful when:
 Check the IntelliJ IDEA log for messages from the plugin:
 - `Help` → `Show Log in Finder/Explorer`
 
-The plugin logs its activities with the prefix `FileWatcherService` and `ProjectOpenListener`.
+The plugin logs what it starts, subscribes, ignores and triggers under the `com.radut.plugin.bfw` loggers. Enable debug logging for that package in `Help` → `Diagnostic Tools` → `Debug Log Settings` to also see ignored events and individual directory subscriptions.
 
 ## Support Development
 

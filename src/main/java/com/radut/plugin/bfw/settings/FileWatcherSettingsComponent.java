@@ -12,6 +12,8 @@ import javax.swing.JButton;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.FlowLayout;
 
 public class FileWatcherSettingsComponent {
@@ -30,7 +32,6 @@ public class FileWatcherSettingsComponent {
     private final JBTextArea pathRegexFiltersArea = new JBTextArea();
     private final JBTextArea ignoredRegexFiltersArea = new JBTextArea();
 
-    // Labels that should be grayed out when disabled
     private final JBLabel configureFilesLabel = new JBLabel("<html>Configure which files should trigger auto-reload and rebuild:</html>");
     private final JBLabel includedRegexHeaderLabel = new JBLabel("<html><b>Included Path Regex Filters(Valid for Content Only)</b></html>");
     private final JBLabel includedRegexDescLabel = new JBLabel("<html>Enter regex patterns (one per line) to INCLUDE file paths. Files matching at least one pattern will be watched:<br/>Example: .*\\.java$ (matches all Java files) <br/>Empty means matches all files</html>");
@@ -39,9 +40,8 @@ public class FileWatcherSettingsComponent {
     private final JBLabel actionsHeaderLabel = new JBLabel("<html><b>Actions Configuration</b></html>");
     private final JBLabel debounceDelayLabel = new JBLabel("Debounce delay (milliseconds):");
 
-    // Store scroll panes for enable/disable
-    private JScrollPane includedScrollPane;
-    private JScrollPane ignoredScrollPane;
+    private final JScrollPane includedScrollPane;
+    private final JScrollPane ignoredScrollPane;
 
     public FileWatcherSettingsComponent() {
         debounceDelayField.setColumns(6);
@@ -56,29 +56,27 @@ public class FileWatcherSettingsComponent {
         ignoredScrollPane = new JScrollPane(ignoredRegexFiltersArea);
         ignoredScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
 
-        // Add listeners to enable/disable regex fields based on checkbox states
         isInSource.addItemListener(e -> updateIgnoreRegexFieldState());
         isInTestSource.addItemListener(e -> updateIgnoreRegexFieldState());
-        isInContent.addItemListener(e -> updateIncludedRegexFieldState());
+        isInContent.addItemListener(e -> {
+            updateIncludedRegexFieldState();
+            updateIgnoreRegexFieldState();
+        });
 
-        // Create donation link
         LinkLabel<String> donateLink = new LinkLabel<>("Donate", null, (aSource, aLinkData) -> {
             BrowserUtil.browse("https://www.paypal.com/donate/?hosted_button_id=C9U54KULFG48C");
         });
         donateLink.setToolTipText("Support the development of this plugin");
 
-        // Create a panel for the header with donate link
         JPanel headerPanel = new JPanel(new BorderLayout());
         headerPanel.add(new JBLabel("<html><b>File Watching Configuration</b></html>"), BorderLayout.WEST);
         headerPanel.add(donateLink, BorderLayout.EAST);
 
-        // Create a panel for the control buttons
         JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
         controlPanel.add(startButton);
         controlPanel.add(stopButton);
         controlPanel.add(statusLabel);
 
-        // Create a separate panel for all settings (to enable/disable as a group)
         settingsPanel = FormBuilder.createFormBuilder()
 
                 .addComponent(actionsHeaderLabel, 0)
@@ -115,7 +113,6 @@ public class FileWatcherSettingsComponent {
                 .addComponentFillVertically(new JPanel(), 0)
                 .getPanel();
 
-        // Create main panel with header, controls, and settings
         mainPanel = FormBuilder.createFormBuilder()
                 .addComponent(headerPanel, 0)
                 .addVerticalGap(10)
@@ -126,7 +123,6 @@ public class FileWatcherSettingsComponent {
                 .addComponent(settingsPanel, 0)
                 .getPanel();
 
-        // Set initial state of regex fields
         updateIncludedRegexFieldState();
         updateIgnoreRegexFieldState();
     }
@@ -179,7 +175,7 @@ public class FileWatcherSettingsComponent {
         try {
             return Integer.parseInt(debounceDelayField.getText());
         } catch (NumberFormatException e) {
-            return 500; // default
+            return 500;
         }
     }
 
@@ -228,27 +224,19 @@ public class FileWatcherSettingsComponent {
     }
 
     private void enableAllSettings(boolean enabled) {
-        // Enable/disable the entire settings panel at once
-        // This grays out all components within the panel (checkboxes, fields, labels)
         settingsPanel.setEnabled(enabled);
-
-        // Recursively enable/disable all child components
         setEnabledRecursive(settingsPanel, enabled);
     }
 
-    private void setEnabledRecursive(java.awt.Container container, boolean enabled) {
-        for (java.awt.Component component : container.getComponents()) {
+    private static void setEnabledRecursive(Container container, boolean enabled) {
+        for (Component component : container.getComponents()) {
             component.setEnabled(enabled);
-            if (component instanceof java.awt.Container) {
-                setEnabledRecursive((java.awt.Container) component, enabled);
+            if (component instanceof Container child) {
+                setEnabledRecursive(child, enabled);
             }
         }
     }
 
-    /**
-     * Updates the enabled state of Included Regex fields.
-     * Enabled only when isInContent is checked.
-     */
     private void updateIncludedRegexFieldState() {
         boolean enabled = isInContent.isSelected();
         includedRegexHeaderLabel.setEnabled(enabled);
@@ -257,12 +245,8 @@ public class FileWatcherSettingsComponent {
         includedScrollPane.setEnabled(enabled);
     }
 
-    /**
-     * Updates the enabled state of Ignore Regex fields.
-     * Enabled only when at least one of isInSource or isInTestSource is checked.
-     */
     private void updateIgnoreRegexFieldState() {
-        boolean enabled = isInSource.isSelected() || isInTestSource.isSelected();
+        boolean enabled = isInSource.isSelected() || isInTestSource.isSelected() || isInContent.isSelected();
         ignoredRegexHeaderLabel.setEnabled(enabled);
         ignoredRegexDescLabel.setEnabled(enabled);
         ignoredRegexFiltersArea.setEnabled(enabled);

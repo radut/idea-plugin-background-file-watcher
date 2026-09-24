@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.radut.plugin"
-version = "1.1.1"
+version = "1.2.0"
 
 // Platform we compile against. Keep this at the OLDEST supported IDE so we can never
 // accidentally call an API that does not exist on it; forward compatibility is proven

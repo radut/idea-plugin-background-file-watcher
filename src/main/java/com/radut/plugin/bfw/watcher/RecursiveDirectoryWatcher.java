@@ -4,482 +4,363 @@ import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.IOException;
 import java.nio.file.ClosedWatchServiceException;
+import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
+
+import static java.nio.file.StandardWatchEventKinds.ENTRY_CREATE;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_DELETE;
+import static java.nio.file.StandardWatchEventKinds.ENTRY_MODIFY;
+import static java.nio.file.StandardWatchEventKinds.OVERFLOW;
 
 /**
- * Recursively watches a directory tree for file system changes. Automatically registers new subdirectories and handles
- * directory deletions.
+ * Watches a {@link WatchScope} with one {@link WatchService} and one thread. Directories are
+ * subscribed when they enter the scope or get created and unsubscribed when they leave it or
+ * disappear, so a scope change only touches the directories whose membership changed.
  */
-public class RecursiveDirectoryWatcher {
+public final class RecursiveDirectoryWatcher {
     private static final Logger LOG = Logger.getInstance(RecursiveDirectoryWatcher.class);
+    private static final long STOP_TIMEOUT_MS = 2_000;
 
-    private final Path rootPath;
-    private final Set<Path> excludePaths;
-    private final WatchListener listener;
-
-    private WatchService watchService;
-    private Thread watchThread;
-    private volatile boolean running = false;
-
-    // Registered directories. The reverse direction is deliberately not cached: a polled key is
-    // not necessarily the same object register() handed back, so key -> path lookups miss (and
-    // would grow without bound). WatchKey.watchable() is the authoritative answer instead.
-    private final Map<Path, WatchKey> pathToWatchKey = new ConcurrentHashMap<>();
-
-    // Map to track all files and subdirectories within each watched directory
-    // Key: directory path, Value: set of child paths (files and subdirectories)
-    private final Map<Path, Set<Path>> directoryContents = new ConcurrentHashMap<>();
-
-    /**
-     * Listener interface for file change notifications.
-     */
     public interface WatchListener {
-        /**
-         * Called when file system events have been detected and the settle delay has passed.
-         */
-        void onFileChangesDetected(final WatchEvent.Kind<?> kind, final Path fileName);
+        void onFileEvent(WatchEvent.Kind<?> kind, Path path);
     }
 
-    /**
-     * Creates a new recursive directory watcher.
-     *
-     * @param rootPath     The root directory to watch
-     * @param excludePaths Paths to exclude from watching (can be empty)
-     * @param listener     Callback for change notifications
-     */
-    public RecursiveDirectoryWatcher(Path rootPath, Set<Path> excludePaths, WatchListener listener) {
-        this.rootPath = rootPath;
-        this.excludePaths = excludePaths != null ? excludePaths : Collections.emptySet();
+    private record Event(WatchEvent.Kind<?> kind, Path path) {
+    }
+
+    /** A subscribed directory and the entry names it contained when last seen. */
+    private static final class WatchedDirectory {
+        final WatchKey key;
+        final Set<String> entries = new HashSet<>();
+
+        WatchedDirectory(WatchKey key) {
+            this.key = key;
+        }
+    }
+
+    private final String name;
+    private final WatchListener listener;
+    private final Map<Path, WatchedDirectory> directories = new HashMap<>();
+    private WatchScope scope = WatchScope.EMPTY;
+    private WatchService watchService;
+    private Thread thread;
+    private volatile boolean stopping;
+
+    public RecursiveDirectoryWatcher(String name, WatchListener listener) {
+        this.name = name;
         this.listener = listener;
     }
 
-    /**
-     * Starts watching the directory tree.
-     */
     public synchronized void start() throws IOException {
-        if (running) {
-            LOG.warn("RecursiveDirectoryWatcher already running for: " + rootPath);
-            return;
-        }
-
-        if (!Files.exists(rootPath) || !Files.isDirectory(rootPath)) {
-            throw new IOException("Root path does not exist or is not a directory: " + rootPath);
-        }
-
-        LOG.info("Starting RecursiveDirectoryWatcher for: " + rootPath);
-
-        watchService = FileSystems.getDefault().newWatchService();
-        running = true;
-
-        // Register all existing directories
-        registerRecursively(rootPath);
-
-        // Start the watch thread
-        watchThread = new Thread(this::watchLoop, "RecursiveWatcher-" + rootPath.getFileName());
-        watchThread.setDaemon(true);
-        watchThread.start();
-    }
-
-    /**
-     * Stops watching the directory tree.
-     */
-    public synchronized void stop() {
-        if (!running) {
-            return;
-        }
-
-        LOG.info("Stopping RecursiveDirectoryWatcher for: " + rootPath);
-        running = false;
-
-        // Close watch service to unblock the watch thread
         if (watchService != null) {
-            try {
-                watchService.close();
-            } catch (IOException e) {
-                LOG.warn("Error closing watch service", e);
-            }
-        }
-
-        // Wait for watch thread to finish
-        if (watchThread != null) {
-            try {
-                watchThread.join(5000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                LOG.warn("Interrupted while waiting for watch thread to stop");
-            }
-            watchThread = null;
-        }
-
-        // Clear tracking maps
-        pathToWatchKey.clear();
-        directoryContents.clear();
-
-        LOG.info("Stopped RecursiveDirectoryWatcher for: " + rootPath);
-    }
-
-    /**
-     * Checks if the watcher is currently running.
-     */
-    public boolean isRunning() {
-        return running;
-    }
-
-    /**
-     * Recursively registers a directory and all its subdirectories with the watch service.
-     */
-    private void registerRecursively(Path directory) throws IOException {
-        Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                // Skip excluded paths
-                if (shouldExclude(dir)) {
-                    return FileVisitResult.SKIP_SUBTREE;
-                }
-
-                // Register this directory
-                registerDirectory(dir);
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                LOG.warn("Failed to visit: " + file, exc);
-                return FileVisitResult.CONTINUE;
-            }
-        });
-    }
-
-    /**
-     * Registers a single directory with the watch service.
-     */
-    private void registerDirectory(Path dir) throws IOException {
-        // Don't register if already registered
-        if (pathToWatchKey.containsKey(dir)) {
             return;
         }
-
-        WatchKey key = dir.register(watchService,
-                StandardWatchEventKinds.ENTRY_CREATE,
-                StandardWatchEventKinds.ENTRY_DELETE,
-                StandardWatchEventKinds.ENTRY_MODIFY);
-
-        pathToWatchKey.put(dir, key);
-
-        // Scan and track all files and subdirectories in this directory
-        scanAndTrackDirectory(dir);
-
-        LOG.info("Registered directory: " + dir);
+        stopping = false;
+        WatchService service = FileSystems.getDefault().newWatchService();
+        watchService = service;
+        thread = new Thread(() -> watchLoop(service), "BackgroundFileWatcher-" + name);
+        thread.setDaemon(true);
+        thread.start();
+        subscribeScope(WatchScope.EMPTY, scope);
+        LOG.info(name + ": watcher started, " + directories.size() + " directories subscribed");
     }
 
-    /**
-     * Unregisters a directory from the watch service.
-     */
-    private void unregisterDirectory(Path dir) {
-        WatchKey key = pathToWatchKey.remove(dir);
-        if (key != null) {
-            key.cancel();
-            LOG.info("Unregistered directory: " + dir);
+    public synchronized void updateScope(WatchScope newScope) {
+        WatchScope previous = scope;
+        scope = newScope;
+        if (watchService == null || previous.equals(newScope)) {
+            return;
         }
+        int before = directories.size();
+        int unsubscribed = unsubscribeOutOfScope();
+        subscribeScope(previous, newScope);
+        int subscribed = directories.size() - before + unsubscribed;
+        LOG.info(name + ": scope changed to " + newScope + ", " + subscribed + " directories subscribed, "
+                 + unsubscribed + " unsubscribed, " + directories.size() + " watched");
     }
 
-    /**
-     * Checks if a path should be excluded from watching.
-     */
-    private boolean shouldExclude(Path path) {
-        for (Path excludePath : excludePaths) {
-            if (path.equals(excludePath) || path.startsWith(excludePath)) {
-                return true;
+    public void stop() {
+        stopping = true;
+        WatchService service;
+        Thread watchThread;
+        synchronized (this) {
+            if (watchService == null) {
+                return;
             }
+            service = watchService;
+            watchThread = thread;
+            watchService = null;
+            thread = null;
+            directories.clear();
         }
-        return false;
-    }
-
-    /**
-     * Tracks a file or subdirectory within its parent directory.
-     */
-    private void trackChild(Path parent, Path child) {
-        directoryContents.computeIfAbsent(parent, k -> ConcurrentHashMap.newKeySet()).add(child);
-    }
-
-    /**
-     * Removes tracking for a child within its parent directory.
-     *
-     * @return
-     */
-    private boolean untrackChild(Path parent, Path child) {
-        Set<Path> children = directoryContents.get(parent);
-        if (children != null) {
-            return children.remove(child);
-        }
-        return false;
-    }
-
-    /**
-     * Recursively gets all tracked children (files and subdirectories) of a directory.
-     */
-    private List<Path> getAllChildren(Path directory) {
-        List<Path> allChildren = new ArrayList<>();
-        Set<Path> directChildren = directoryContents.get(directory);
-
-        if (directChildren != null) {
-            for (Path child : directChildren) {
-                allChildren.add(child);
-                // If this child is a directory, recursively get its children
-                if (Files.isDirectory(child)) {
-                    allChildren.addAll(getAllChildren(child));
-                }
-            }
-        }
-
-        return allChildren;
-    }
-
-    /**
-     * Scans a directory and tracks all its immediate children.
-     */
-    private void scanAndTrackDirectory(Path directory) {
         try {
-            if (Files.isDirectory(directory)) {
-                try (var stream = Files.list(directory)) {
-                    stream.forEach(child -> {
-                        if (!shouldExclude(child)) {
-                            trackChild(child.getParent(), child);
-                            // If it's a subdirectory, recursively scan it
-                            if (Files.isDirectory(child)) {
-                                scanAndTrackDirectory(child);
-                            }
+            service.close();
+        } catch (IOException e) {
+            LOG.warn(name + ": failed to close watch service", e);
+        }
+        try {
+            watchThread.join(STOP_TIMEOUT_MS);
+            if (watchThread.isAlive()) {
+                LOG.warn(name + ": watch thread did not stop within " + STOP_TIMEOUT_MS + " ms");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        LOG.info(name + ": watcher stopped");
+    }
+
+    public synchronized int watchedDirectoryCount() {
+        return directories.size();
+    }
+
+    private int unsubscribeOutOfScope() {
+        List<Path> leaving = directories.keySet().stream().filter(dir -> !scope.covers(dir)).toList();
+        leaving.forEach(this::unsubscribe);
+        return leaving.size();
+    }
+
+    private void subscribeScope(WatchScope previous, WatchScope current) {
+        for (Path root : current.roots()) {
+            subscribeTree(root, null);
+        }
+        for (Path lifted : previous.exclusions()) {
+            if (!current.exclusions().contains(lifted) && current.covers(lifted)) {
+                subscribeTree(lifted, null);
+            }
+        }
+    }
+
+    /**
+     * Subscribes every in-scope directory below {@code start}, skipping subtrees that are already
+     * subscribed. When {@code discovered} is given, every file and directory found is reported
+     * as created, which is how a directory moved into the tree announces its content.
+     */
+    private void subscribeTree(Path start, List<Event> discovered) {
+        try {
+            Files.walkFileTree(start, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                    if (stopping) {
+                        return FileVisitResult.TERMINATE;
+                    }
+                    if (directories.containsKey(dir)) {
+                        return FileVisitResult.SKIP_SUBTREE;
+                    }
+                    remember(dir);
+                    if (scope.covers(dir)) {
+                        subscribe(dir);
+                        if (discovered != null && !dir.equals(start)) {
+                            discovered.add(new Event(ENTRY_CREATE, dir));
                         }
-                    });
-                } catch (IOException e) {
-                    LOG.warn("Failed to scan directory: " + directory, e);
+                        return FileVisitResult.CONTINUE;
+                    }
+                    return scope.hasRootBelow(dir) ? FileVisitResult.CONTINUE : FileVisitResult.SKIP_SUBTREE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (remember(file) && discovered != null) {
+                        discovered.add(new Event(ENTRY_CREATE, file));
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException e) {
+                    LOG.warn(name + ": cannot access " + file + ": " + e);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        } catch (ClosedWatchServiceException e) {
+            LOG.info(name + ": watch service closed while subscribing " + start);
+        } catch (IOException e) {
+            LOG.warn(name + ": failed to subscribe " + start, e);
+        }
+    }
+
+    private void subscribe(Path dir) throws IOException {
+        WatchKey key = dir.register(watchService, ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY);
+        directories.put(dir, new WatchedDirectory(key));
+        LOG.debug("Subscribed " + dir);
+    }
+
+    private void unsubscribe(Path dir) {
+        WatchedDirectory watched = directories.remove(dir);
+        if (watched != null) {
+            watched.key.cancel();
+            LOG.debug("Unsubscribed " + dir);
+        }
+    }
+
+    /** Unsubscribes {@code dir} and everything below it, reporting the entries that vanished with it. */
+    private void unsubscribeTree(Path dir, List<Event> events) {
+        WatchedDirectory watched = directories.remove(dir);
+        if (watched == null) {
+            return;
+        }
+        watched.key.cancel();
+        LOG.debug("Unsubscribed " + dir);
+        for (String entry : watched.entries) {
+            Path child = dir.resolve(entry);
+            unsubscribeTree(child, events);
+            if (scope.covers(child)) {
+                events.add(new Event(ENTRY_DELETE, child));
+            }
+        }
+    }
+
+    /** Records {@code path} as an entry of its parent when the parent is subscribed. */
+    private boolean remember(Path path) {
+        WatchedDirectory parent = directories.get(path.getParent());
+        return parent != null && parent.entries.add(entryName(path));
+    }
+
+    private void watchLoop(WatchService service) {
+        LOG.info(name + ": watch loop started");
+        try {
+            while (true) {
+                WatchKey key = service.take();
+                List<Event> events = new ArrayList<>();
+                synchronized (this) {
+                    if (watchService != service) {
+                        break;
+                    }
+                    handle(key, events);
+                }
+                events.forEach(this::deliver);
+            }
+        } catch (ClosedWatchServiceException | InterruptedException e) {
+            LOG.debug(name + ": watch service closed");
+        } catch (Exception e) {
+            LOG.error(name + ": watch loop failed, files are no longer watched", e);
+        }
+        LOG.info(name + ": watch loop finished");
+    }
+
+    private void handle(WatchKey key, List<Event> events) {
+        Path dir = watchedDirectory(key);
+        WatchedDirectory watched = dir == null ? null : directories.get(dir);
+        if (watched == null) {
+            key.cancel();
+            return;
+        }
+        try {
+            for (WatchEvent<?> event : key.pollEvents()) {
+                WatchEvent.Kind<?> kind = event.kind();
+                if (kind == OVERFLOW) {
+                    resync(dir, watched, events);
+                    continue;
+                }
+                Path path = dir.resolve(event.context().toString());
+                if (kind == ENTRY_CREATE) {
+                    created(path, watched, events);
+                } else if (kind == ENTRY_DELETE) {
+                    deleted(path, watched, events);
+                } else {
+                    modified(path, watched, events);
                 }
             }
         } catch (Exception e) {
-            LOG.warn("Error tracking directory: " + directory, e);
+            LOG.warn(name + ": failed to process events for " + dir, e);
+        }
+        if (!key.reset()) {
+            LOG.debug("Directory gone: " + dir);
+            unsubscribeTree(dir, events);
         }
     }
 
-    /**
-     * Main watch loop that processes file system events.
-     */
-    private void watchLoop() {
+    private void created(Path path, WatchedDirectory parent, List<Event> events) {
+        parent.entries.add(entryName(path));
+        boolean directory = Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS);
+        if (scope.covers(path)) {
+            events.add(new Event(ENTRY_CREATE, path));
+            if (directory) {
+                subscribeTree(path, events);
+            }
+        } else if (directory && scope.hasRootBelow(path)) {
+            subscribeTree(path, events);
+        }
+    }
+
+    private void deleted(Path path, WatchedDirectory parent, List<Event> events) {
+        parent.entries.remove(entryName(path));
+        unsubscribeTree(path, events);
+        if (scope.covers(path)) {
+            events.add(new Event(ENTRY_DELETE, path));
+        }
+    }
+
+    private void modified(Path path, WatchedDirectory parent, List<Event> events) {
+        if (directories.containsKey(path)) {
+            return;
+        }
+        parent.entries.add(entryName(path));
+        if (scope.covers(path)) {
+            events.add(new Event(ENTRY_MODIFY, path));
+        }
+    }
+
+    /** The OS dropped events for {@code dir}: reconcile its entries with what is on disk. */
+    private void resync(Path dir, WatchedDirectory watched, List<Event> events) {
+        LOG.warn(name + ": event overflow in " + dir + ", rescanning it");
+        events.add(new Event(OVERFLOW, dir));
+        Set<String> present = new HashSet<>();
+        try (Stream<Path> children = Files.list(dir)) {
+            children.forEach(child -> present.add(entryName(child)));
+        } catch (IOException e) {
+            LOG.warn(name + ": cannot list " + dir + " after overflow", e);
+            return;
+        }
+        for (String entry : new ArrayList<>(watched.entries)) {
+            if (!present.contains(entry)) {
+                deleted(dir.resolve(entry), watched, events);
+            }
+        }
+        for (String entry : present) {
+            if (!watched.entries.contains(entry)) {
+                created(dir.resolve(entry), watched, events);
+            }
+        }
+    }
+
+    private void deliver(Event event) {
         try {
-            while (running) {
-                WatchKey key;
-                try {
-                    key = watchService.poll(200, TimeUnit.MILLISECONDS);
-                    if (key == null) {
-                        continue;
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (ClosedWatchServiceException e) {
-                    // Watch service was closed, exit loop
-                    break;
-                }
-
-                Path dir = resolveWatchedDirectory(key);
-                if (dir == null) {
-                    LOG.warn("Watch key without a resolvable directory, cancelling key: " + key.watchable());
-                    key.cancel();
-                    continue;
-                }
-
-                try {
-
-                    for (WatchEvent<?> event : key.pollEvents()) {
-                        WatchEvent.Kind<?> kind = event.kind();
-
-                        if (kind == StandardWatchEventKinds.OVERFLOW) {
-                            LOG.warn("Watch event overflow detected");
-                            continue;
-                        }
-
-                        @SuppressWarnings("unchecked")
-                        WatchEvent<Path> pathEvent = (WatchEvent<Path>) event;
-                        Path fileName = pathEvent.context();
-                        // Resolve through the name, not the Path object: the event context can
-                        // come from a different NIO provider than our paths (the IDE installs
-                        // its own default FileSystemProvider), and mixing the two throws
-                        // ProviderMismatchException.
-                        Path fullPath = dir.resolve(fileName.toString());
-
-                        // Handle CREATE events
-                        if (kind == StandardWatchEventKinds.ENTRY_CREATE) {
-                            if (!shouldExclude(fullPath)) {
-                                // If it's a directory, register it for watching
-                                if (Files.isDirectory(fullPath)) {
-                                    scanAndTrackDirectory(fullPath);
-                                    registerRecursively(fullPath);
-                                }
-                                // Track this new file/directory in the parent directory
-                                trackChild(fullPath.getParent(), fullPath);
-
-                                // Notify listener about the creation
-                                notifyListener(kind, fullPath);
-                                //mkdir -p multi-level
-                                for (Path child : getAllChildren(fullPath)) {
-                                    notifyListener(kind, child);
-                                }
-                            }
-                        }
-                        // Handle DELETE events
-                        else if (kind == StandardWatchEventKinds.ENTRY_DELETE) {
-
-                            if (!shouldExclude(fullPath)) {
-                                if (directoryContents.containsKey(fullPath)) {
-                                    // Get all children before we remove tracking
-                                    List<Path> allChildren = getAllChildren(fullPath);
-
-                                    // If it had children, notify about each child
-                                    for (Path child : allChildren) {
-                                        untrackChild(child.getParent(), child);
-                                        notifyListener(kind, child);
-                                    }
-                                }
-                                Set<Path> paths = directoryContents.get(fullPath.getParent());
-                                if (paths != null) {
-                                    if (paths.contains(fullPath)) {
-                                        untrackChild(fullPath.getParent(), fullPath);
-                                        notifyListener(kind, fullPath);
-                                    }
-                                }
-
-                                // Clean up directory contents tracking
-                                directoryContents.remove(fullPath);
-
-                                // If this was a registered directory, unregister it
-                                if (pathToWatchKey.containsKey(fullPath)) {
-                                    unregisterDirectory(fullPath);
-
-                                    // Unregister all subdirectories
-                                    List<Path> toRemove = new ArrayList<>();
-                                    for (Path registeredPath : pathToWatchKey.keySet()) {
-                                        if (registeredPath.startsWith(fullPath)
-                                            && !registeredPath.equals(fullPath)) {
-                                            toRemove.add(registeredPath);
-                                        }
-                                    }
-                                    for (Path path : toRemove) {
-                                        unregisterDirectory(path);
-                                    }
-                                }
-
-                            }
-                        }
-                        // Handle MODIFY events
-                        else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-                            if (!shouldExclude(fullPath)) {
-                                // Ensure the file is tracked (in case we missed the CREATE)
-                                trackChild(fullPath.getParent(), fullPath);
-
-                                // Notify listener about the modification
-                                notifyListener(kind, fullPath);
-                            }
-                        }
-
-                    }
-
-                } catch (Exception e) {
-                    // Never let a single bad event tear down the whole watcher: the thread
-                    // dying here means the project silently stops being watched.
-                    LOG.warn("Error processing watch events for: " + dir, e);
-                } finally {
-                    boolean valid = key.reset();
-                    if (!valid) {
-                        // Directory is no longer accessible
-                        pathToWatchKey.remove(dir);
-                        if (!shouldExclude(dir)) {
-                            if (directoryContents.containsKey(dir)) {
-                                List<Path> allChildren = getAllChildren(dir);
-                                // If it had children, notify about each child
-                                for (Path child : allChildren) {
-                                    untrackChild(child.getParent(), child);
-                                    notifyListener(StandardWatchEventKinds.ENTRY_DELETE, child);
-                                }
-                            }
-                            Set<Path> paths = directoryContents.get(dir.getParent());
-                            if (paths != null) {
-                                if (paths.contains(dir)) {
-                                    untrackChild(dir.getParent(), dir);
-                                    notifyListener(StandardWatchEventKinds.ENTRY_DELETE, dir);
-                                }
-                            }
-
-                            // Clean up directory contents tracking
-                            directoryContents.remove(dir);
-                        }
-                        LOG.info("Watch key no longer valid for: " + dir);
-                    }
-
-                }
-            }
-        } catch (
-                Exception e) {
-            LOG.error("Error in watch loop for: " + rootPath, e);
-        }
-    }
-
-
-    /**
-     * Re-anchors a path onto the same FileSystem as the watched root. Paths handed back by the
-     * WatchService may belong to the platform provider while ours belong to the provider the IDE
-     * installs as default; comparing or resolving across the two silently misbehaves.
-     */
-    private Path toLocalPath(Path other) {
-        if (other.getFileSystem() == rootPath.getFileSystem()) {
-            return other;
-        }
-        return rootPath.getFileSystem().getPath(other.toString());
-    }
-
-    /**
-     * Resolves the directory a polled key belongs to. The key is asked directly rather than looked
-     * up in a map: register() and poll() do not necessarily deal in the same key objects once the
-     * IDE installs its own default FileSystemProvider, so a map lookup misses and the old code
-     * then cancelled a perfectly live key - which silently stopped watching that directory.
-     */
-    private Path resolveWatchedDirectory(WatchKey key) {
-        if (key.watchable() instanceof Path watched) {
-            return toLocalPath(watched);
-        }
-        return null;
-    }
-
-    private void notifyListener(final WatchEvent.Kind<?> kind, final Path fileName) {
-
-        if (listener != null && running) {
-            try {
-                listener.onFileChangesDetected(kind, fileName);
-            } catch (Exception e) {
-                LOG.error("Error notifying listener", e);
-            }
+            listener.onFileEvent(event.kind(), event.path());
+        } catch (Exception e) {
+            LOG.error(name + ": listener failed for " + event.path(), e);
         }
     }
 
     /**
-     * Gets the root path being watched.
+     * The IDE installs its own default file system provider, so paths handed back by the OS
+     * watch service may belong to a different provider than the paths we registered. Comparing
+     * or resolving across providers fails, hence the re-anchoring by string.
      */
-    public Path getRootPath() {
-        return rootPath;
+    private static Path watchedDirectory(WatchKey key) {
+        if (!(key.watchable() instanceof Path path)) {
+            return null;
+        }
+        FileSystem local = FileSystems.getDefault();
+        return path.getFileSystem() == local ? path : local.getPath(path.toString());
     }
 
+    private static String entryName(Path path) {
+        return path.getFileName().toString();
+    }
 }

@@ -15,25 +15,12 @@ public class ProjectOpenListener implements ProjectActivity {
     @Nullable
     @Override
     public Object execute(@NotNull Project project, @NotNull Continuation<? super Unit> continuation) {
-        LOG.info("Project opened: " + project.getName());
-
-        // Check if file watching is enabled in settings
-        FileWatcherSettings settings = FileWatcherSettings.getInstance(project);
-        if (!settings.isEnabled()) {
-            LOG.info("File watching is disabled in settings for project: " + project.getName());
-            return Unit.INSTANCE;
-        }
-
-        // Get the FileWatcherService and start watching
-        FileWatcherService service = project.getService(FileWatcherService.class);
-        if (service != null) {
-            service.startWatching();
-            LOG.info("File watcher started for project: " + project.getName());
+        if (FileWatcherSettings.getInstance(project).isEnabled()) {
+            LOG.info("File watching is enabled for project " + project.getName() + ", starting it");
+            project.getService(FileWatcherService.class).startWatching();
         } else {
-            LOG.error("Could not get FileWatcherService for project: " + project.getName());
+            LOG.info("File watching is disabled for project " + project.getName());
         }
-
         return Unit.INSTANCE;
     }
 }
-
